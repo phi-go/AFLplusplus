@@ -430,6 +430,12 @@ source-only: all radamsa
 	$(MAKE) -C libdislocator
 	$(MAKE) -C libtokencap
 
+llvm-mode: all
+	-$(MAKE) -C llvm_mode
+	-$(MAKE) -C gcc_plugin
+	$(MAKE) -C libdislocator
+	$(MAKE) -C libtokencap
+
 %.8:	%
 	@echo .TH $* 8 $(BUILD_DATE) "afl++" > $@
 	@echo .SH NAME >> $@
