@@ -256,7 +256,7 @@ ifeq "$(LLVM_LTO)" "1"
 endif
 endif
 
-../afl-ld: afl-ld.c
+../afl-ld: afl-ld.c ../afl-llvm-pass.so ../afl-llvm-rt.o 
 ifneq "$(AFL_CLANG_FLTO)" ""
 ifeq "$(LLVM_LTO)" "1"
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
