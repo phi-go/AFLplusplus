@@ -180,6 +180,7 @@ static void __afl_map_shm(void) {
 /* Fork server logic. */
 
 static void __afl_start_forkserver(void) {
+  fprintf(stderr, "hi there");
 
   static u8 tmp[4];
   s32       child_pid;
@@ -356,7 +357,7 @@ __attribute__((constructor(CONST_PRIO))) void __afl_auto_init(void) {
    edge (as opposed to every basic block). */
 
 void __sanitizer_cov_trace_pc_guard(uint32_t *guard) {
-
+  fprintf(stderr, "guard: %i", guard);
   __afl_area_ptr[*guard]++;
 
 }
