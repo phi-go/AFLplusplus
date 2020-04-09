@@ -37,6 +37,8 @@
 #include <stdint.h>
 #include <errno.h>
 
+#include <zmq.h>
+
 #include <sys/mman.h>
 #include <sys/shm.h>
 #include <sys/wait.h>
@@ -177,10 +179,47 @@ static void __afl_map_shm(void) {
 
 }
 
+/* ZMQ fork */
+static void __afl_start_zmq(void) {
+  char * afl_zmq_url = getenv("AFL_ZMQ_URL");
+  if (!afl_zmq_url) {
+    return;
+  }
+
+  void (*old_sigchld_handler)(int) = 0;  // = signal(SIGCHLD, SIG_DFL);
+
+  s32 child_pid = fork();
+  if (child_pid < 0) _exit(1);
+
+  if (!child_pid) { // in child
+    signal(SIGCHLD, old_sigchld_handler);
+    //  Socket to talk to clients
+    void *context = zmq_ctx_new ();
+    void *responder = zmq_socket (context, ZMQ_REP);
+    int rc = zmq_bind (responder, afl_zmq_url);
+    if (rc != 0) {
+      printf("ZMQ error: %s\n", strerror(errno));
+    } else {
+      printf("ZMQ is up\n");
+      while (1) {
+        char buffer [10];
+        zmq_recv (responder, buffer, 10, 0);
+        if (buffer[0] == 0) {
+          zmq_send (responder, "bye", 3, 0);
+          break;
+        } else {
+          zmq_send (responder, buffer, 10, 0);
+        }
+      }
+    }
+  }
+  return;
+}
+
 /* Fork server logic. */
 
 static void __afl_start_forkserver(void) {
-  fprintf(stderr, "hi there");
+  __afl_start_zmq();
 
   static u8 tmp[4];
   s32       child_pid;
@@ -357,9 +396,7 @@ __attribute__((constructor(CONST_PRIO))) void __afl_auto_init(void) {
    edge (as opposed to every basic block). */
 
 void __sanitizer_cov_trace_pc_guard(uint32_t *guard) {
-  fprintf(stderr, "guard: %i", guard);
   __afl_area_ptr[*guard]++;
-
 }
 
 /* Init callback. Populates instrumentation IDs. Note that we're using
