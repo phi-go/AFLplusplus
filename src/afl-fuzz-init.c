@@ -2215,3 +2215,15 @@ void disconnect_zmq(afl_state_t * afl) {
     zmq_close(afl->zmq_socket);
     zmq_ctx_destroy(afl->zmq_context);
 }
+
+void   zmq_send_file_path(afl_state_t * afl, char * file_path, u64 execs) {
+  if (afl->zmq_socket) {
+    const int MAX_MSG_SIZE = 1024;
+    char msg [MAX_MSG_SIZE];
+    if (strlen(file_path) > MAX_MSG_SIZE) {
+      WARNF("queue fname longer than expected: %s", file_path);
+    }
+    snprintf(msg, MAX_MSG_SIZE, "F_QX%lld|%s", execs, file_path);
+    zmq_send(afl->zmq_socket, msg, strlen(msg), 0);
+  }
+}

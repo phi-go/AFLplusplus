@@ -730,6 +730,8 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
   ck_write(fd, mem, len, fn);
   close(fd);
 
+  zmq_send_file_path(afl, fn, /* execs */ 1);
+
   return keeping;
 
 }

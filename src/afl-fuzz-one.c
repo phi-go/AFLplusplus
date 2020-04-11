@@ -2359,17 +2359,7 @@ abandon_entry:
   ++afl->queue_cur->fuzz_level;
 
   munmap(orig_in, afl->queue_cur->len);
-  if (afl->zmq_socket) {
-    const int MAX_MSG_SIZE = 1024;
-    char msg [MAX_MSG_SIZE];
-    if (strlen(afl->queue_cur->fname) > MAX_MSG_SIZE) {
-      WARNF("queue fname longer than expected: %s", afl->queue_cur->fname);
-    }
-    snprintf(msg, MAX_MSG_SIZE, "F_QX%lld|%s",
-             afl->total_execs - num_exec_start,
-             afl->queue_cur->fname);
-    zmq_send(afl->zmq_socket, msg, strlen(msg), 0);
-  }
+  zmq_send_file_path(afl, afl->queue_cur->fname, afl->total_execs - num_exec_start);
   return ret_val;
 
 #undef FLIP_BIT
