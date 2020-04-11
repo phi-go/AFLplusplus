@@ -763,6 +763,8 @@ int main(int argc, char **argv_orig, char **envp) {
 
   ACTF("Getting to work...");
 
+  connect_zmq(afl);
+
   switch (afl->schedule) {
 
     case FAST: OKF("Using exponential power schedule (FAST)"); break;
@@ -1162,6 +1164,8 @@ int main(int argc, char **argv_orig, char **envp) {
   save_auto(afl);
 
 stop_fuzzing:
+
+  disconnect_zmq(afl);
 
   write_stats_file(afl, 0, 0, 0);
   afl->force_ui_update = 1;  // ensure the screen is reprinted

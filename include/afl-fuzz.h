@@ -72,6 +72,8 @@
 #include <sys/ioctl.h>
 #include <sys/file.h>
 
+#include <zmq.h>
+
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || \
     defined(__NetBSD__) || defined(__DragonFly__)
 #include <sys/sysctl.h>
@@ -572,6 +574,10 @@ typedef struct afl_state {
   u8 describe_op_buf_256[256]; /* describe_op will use this to return a string
                                   up to 256 */
 
+  /* ZMQ state */
+  void *zmq_context;
+  void *zmq_socket;
+
 #ifdef _AFL_DOCUMENT_MUTATIONS
   u8  do_document;
   u32 document_counter;
@@ -917,6 +923,8 @@ void   fix_up_banner(afl_state_t *, u8 *);
 void   check_if_tty(afl_state_t *);
 void   setup_signal_handlers(void);
 void   save_cmdline(afl_state_t *, u32, char **);
+void   connect_zmq(afl_state_t *);
+void   disconnect_zmq(afl_state_t *);
 
 /* CmpLog */
 

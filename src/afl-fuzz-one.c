@@ -339,7 +339,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
   s32 len, fd, temp_len, i, j;
   u8 *in_buf, *out_buf, *orig_in, *ex_tmp, *eff_map = 0;
-  u64 havoc_queued = 0, orig_hit_cnt, new_hit_cnt;
+  u64 havoc_queued = 0, orig_hit_cnt, new_hit_cnt, num_exec_start;
   u32 splice_cycle = 0, perf_score = 100, orig_perf, prev_cksum, eff_cnt = 1;
 
   u8 ret_val = 1, doing_det = 0;
@@ -414,6 +414,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
   /* Map the test case into memory. */
 
   fd = open(afl->queue_cur->fname, O_RDONLY);
+  num_exec_start = afl->total_execs;
 
   if (unlikely(fd < 0)) PFATAL("Unable to open '%s'", afl->queue_cur->fname);
 
@@ -2358,7 +2359,17 @@ abandon_entry:
   ++afl->queue_cur->fuzz_level;
 
   munmap(orig_in, afl->queue_cur->len);
-
+  if (afl->zmq_socket) {
+    const int MAX_MSG_SIZE = 1024;
+    char msg [MAX_MSG_SIZE];
+    if (strlen(afl->queue_cur->fname) > MAX_MSG_SIZE) {
+      WARNF("queue fname longer than expected: %s", afl->queue_cur->fname);
+    }
+    snprintf(msg, MAX_MSG_SIZE, "F_QX%lld|%s",
+             afl->total_execs - num_exec_start,
+             afl->queue_cur->fname);
+    zmq_send(afl->zmq_socket, msg, strlen(msg), 0);
+  }
   return ret_val;
 
 #undef FLIP_BIT

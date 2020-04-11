@@ -2181,3 +2181,37 @@ void save_cmdline(afl_state_t *afl, u32 argc, char **argv) {
 
 }
 
+
+void connect_zmq(afl_state_t * afl) {
+  char * afl_zmq_url = getenv("IJON_ZMQ_FUZZER_URL");
+  if (!afl_zmq_url) {
+    WARNF("NOT Connecting to ZMQ as IJON_ZMQ_FUZZER_URL is not set.");
+    afl->zmq_context = NULL;
+    afl->zmq_socket = NULL;
+    return;
+  }
+  if (!afl->sync_id) {
+    FATAL("NOT Connecting to ZMQ as fuzzer has no sync_id use -M or -S.");
+  }
+  OKF("Connecting to ZMQ as '%s'", afl->sync_id);
+  afl->zmq_context = zmq_ctx_new();
+  afl->zmq_socket = zmq_socket(afl->zmq_context, ZMQ_DEALER);
+  zmq_setsockopt(afl->zmq_socket, ZMQ_IDENTITY, afl->sync_id, strlen(afl->sync_id)); 
+  
+  if (zmq_connect(afl->zmq_socket, afl_zmq_url) != 0) {
+    printf("ZMQ error: %s\n", strerror(errno));
+    afl->zmq_context = NULL;
+    afl->zmq_socket = NULL;
+    return;
+  } else {
+    char * msg = "F_UP";
+    zmq_send(afl->zmq_socket, msg, strlen(msg), 0);
+  }
+}
+
+void disconnect_zmq(afl_state_t * afl) {
+    char * msg = "F_DE";
+    zmq_send(afl->zmq_socket, msg, strlen(msg), 0);
+    zmq_close(afl->zmq_socket);
+    zmq_ctx_destroy(afl->zmq_context);
+}
