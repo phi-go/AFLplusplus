@@ -2183,7 +2183,7 @@ void save_cmdline(afl_state_t *afl, u32 argc, char **argv) {
 
 
 void connect_zmq(afl_state_t * afl) {
-  char * afl_zmq_url = getenv("IJON_ZMQ_FUZZER_URL");
+  const char * afl_zmq_url = getenv("IJON_ZMQ_FUZZER_URL");
   if (!afl_zmq_url) {
     WARNF("NOT Connecting to ZMQ as IJON_ZMQ_FUZZER_URL is not set.");
     afl->zmq_context = NULL;
@@ -2193,10 +2193,12 @@ void connect_zmq(afl_state_t * afl) {
   if (!afl->sync_id) {
     FATAL("NOT Connecting to ZMQ as fuzzer has no sync_id use -M or -S.");
   }
-  OKF("Connecting to ZMQ as '%s'", afl->sync_id);
+  char zmq_id[128];
+  snprintf(zmq_id, 128, "F_%s", afl->sync_id);
+  OKF("Connecting to ZMQ as '%s'", zmq_id);
   afl->zmq_context = zmq_ctx_new();
   afl->zmq_socket = zmq_socket(afl->zmq_context, ZMQ_DEALER);
-  zmq_setsockopt(afl->zmq_socket, ZMQ_IDENTITY, afl->sync_id, strlen(afl->sync_id)); 
+  zmq_setsockopt(afl->zmq_socket, ZMQ_IDENTITY, zmq_id, strlen(zmq_id)); 
   
   if (zmq_connect(afl->zmq_socket, afl_zmq_url) != 0) {
     printf("ZMQ error: %s\n", strerror(errno));
@@ -2204,13 +2206,13 @@ void connect_zmq(afl_state_t * afl) {
     afl->zmq_socket = NULL;
     return;
   } else {
-    char * msg = "F_UP";
+    const char * msg = "F_UP";
     zmq_send(afl->zmq_socket, msg, strlen(msg), 0);
   }
 }
 
 void disconnect_zmq(afl_state_t * afl) {
-    char * msg = "F_DE";
+    const char * msg = "F_DE";
     zmq_send(afl->zmq_socket, msg, strlen(msg), 0);
     zmq_close(afl->zmq_socket);
     zmq_ctx_destroy(afl->zmq_context);
@@ -2218,12 +2220,14 @@ void disconnect_zmq(afl_state_t * afl) {
 
 void   zmq_send_file_path(afl_state_t * afl, char * file_path, u64 execs) {
   if (afl->zmq_socket) {
-    const int MAX_MSG_SIZE = 1024;
-    char msg [MAX_MSG_SIZE];
-    if (strlen(file_path) > MAX_MSG_SIZE) {
-      WARNF("queue fname longer than expected: %s", file_path);
+    if (zmq_send(afl->zmq_socket, "F_QX", 4, ZMQ_SNDMORE) == -1) {
+      fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
     }
-    snprintf(msg, MAX_MSG_SIZE, "F_QX%lld|%s", execs, file_path);
-    zmq_send(afl->zmq_socket, msg, strlen(msg), 0);
+    if (zmq_send(afl->zmq_socket, &execs, sizeof(execs), ZMQ_SNDMORE) == -1) {
+      fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
+    }
+    if (zmq_send(afl->zmq_socket, file_path, strlen(file_path), 0) == -1) {
+      fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
+    }
   }
 }

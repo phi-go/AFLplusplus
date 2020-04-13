@@ -38,6 +38,8 @@
 #include <errno.h>
 
 #include <zmq.h>
+#include <sys/time.h>
+#include <time.h>
 
 #include <sys/mman.h>
 #include <sys/shm.h>
@@ -179,39 +181,104 @@ static void __afl_map_shm(void) {
 
 }
 
-/* ZMQ fork */
-static void __afl_start_zmq(void) {
-  char * afl_zmq_url = getenv("AFL_ZMQ_URL");
+
+static void * context = NULL;
+static void * socket = NULL;
+
+static void __connect_zmq(void) {
+  const char * afl_zmq_url = getenv("IJON_ZMQ_FUZZER_URL");
   if (!afl_zmq_url) {
     return;
   }
+  assert(context == NULL && socket == NULL);
+  char zmq_id [128];
+  char time_str[26];
+  struct tm* tm_info;
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  tm_info = localtime(&tv.tv_sec);
+  strftime(time_str, 26, "%Y:%m:%d-%H:%M:%S", tm_info);
+  snprintf(zmq_id, 128, "P_%d_%s", getpid(), time_str);
+  context = zmq_ctx_new();
+  socket = zmq_socket(context, ZMQ_DEALER);
+  zmq_setsockopt(socket, ZMQ_IDENTITY, zmq_id, strlen(zmq_id));
 
-  void (*old_sigchld_handler)(int) = 0;  // = signal(SIGCHLD, SIG_DFL);
+  if (zmq_connect(socket, afl_zmq_url) != 0) {
+    fprintf(stderr, "ZMQ error: %s\n", zmq_strerror(errno));
+    context = NULL;
+    socket = NULL;
+    return;
+  } else {
+    const char * msg = "P_UP";
+    zmq_send(socket, msg, strlen(msg), 0);
+  }
+}
+
+
+static int64_t __zmq_has_more() {
+  int64_t more = 0;
+  size_t more_size = sizeof(more);
+  if (zmq_getsockopt(socket, ZMQ_RCVMORE, &more, &more_size) != 0) {
+    fprintf(stderr, "ZMQ getsockopt: %s\n", zmq_strerror(errno));
+  }
+  return more;
+}
+
+
+static void __zmq_bb_req() {
+  if (!__zmq_has_more()) {
+    fprintf(stderr, "ZMQ expected more message parts for bb req but there are none\n");
+    return;
+  }
+
+  void * pos;
+  unsigned int size;
+  if (zmq_recv(socket, &pos, sizeof(pos), 0) == -1) {
+    fprintf(stderr, "ZMQ recv: %s\n", zmq_strerror(errno));
+  }
+  if (!__zmq_has_more()) {
+    fprintf(stderr, "ZMQ expected more message parts for bb req but there are none\n");
+    return;
+  }
+  if (zmq_recv(socket, &size, sizeof(size), 0) == -1) {
+    fprintf(stderr, "ZMQ recv: %s\n", zmq_strerror(errno));
+  }
+  // send reply
+  if (zmq_send(socket, "P_BB", 4, ZMQ_SNDMORE) == -1) {
+    fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
+  }
+  if (zmq_send(socket, &pos, sizeof(pos), ZMQ_SNDMORE) == -1) {
+    fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
+  }
+  if (zmq_send(socket, &size, sizeof(size), ZMQ_SNDMORE) == -1) {
+    fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
+  }
+  if (zmq_send(socket, pos, size, 0) == -1) {
+    fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
+  }
+}
+
+/* ZMQ fork */
+static void __afl_start_zmqserver(void) {
 
   s32 child_pid = fork();
   if (child_pid < 0) _exit(1);
 
   if (!child_pid) { // in child
-    signal(SIGCHLD, old_sigchld_handler);
-    //  Socket to talk to clients
-    void *context = zmq_ctx_new ();
-    void *responder = zmq_socket (context, ZMQ_REP);
-    int rc = zmq_bind (responder, afl_zmq_url);
-    if (rc != 0) {
-      printf("ZMQ error: %s\n", strerror(errno));
-    } else {
-      printf("ZMQ is up\n");
-      while (1) {
-        char buffer [10];
-        zmq_recv (responder, buffer, 10, 0);
-        if (buffer[0] == 0) {
-          zmq_send (responder, "bye", 3, 0);
-          break;
-        } else {
-          zmq_send (responder, buffer, 10, 0);
+    signal(SIGCHLD, SIG_DFL);
+    __connect_zmq();
+    char msg_type [5] = {0};
+    while (socket) {
+        if (zmq_recv(socket, msg_type, 4, 0) == -1) {
+          fprintf(stderr, "ZMQ recv: %s\n", zmq_strerror(errno));
         }
-      }
+        if (strncmp("BB_R", msg_type, 4) == 0) {
+          __zmq_bb_req();
+        } else {
+          fprintf(stderr, "ZMQ unknown message type: %s\n", msg_type);
+        }
     }
+    fprintf(stderr, "ZMQ ded\n");
   }
   return;
 }
@@ -219,7 +286,7 @@ static void __afl_start_zmq(void) {
 /* Fork server logic. */
 
 static void __afl_start_forkserver(void) {
-  __afl_start_zmq();
+  __afl_start_zmqserver();
 
   static u8 tmp[4];
   s32       child_pid;
