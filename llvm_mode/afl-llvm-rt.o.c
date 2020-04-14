@@ -260,7 +260,6 @@ static void __zmq_bb_req() {
 
 /* ZMQ fork */
 static void __afl_start_zmqserver(void) {
-
   s32 child_pid = fork();
   if (child_pid < 0) _exit(1);
 
@@ -274,11 +273,17 @@ static void __afl_start_zmqserver(void) {
         }
         if (strncmp("BB_R", msg_type, 4) == 0) {
           __zmq_bb_req();
+        } else if (strncmp("PDIE", msg_type, 4) == 0) {
+          break;
         } else {
           fprintf(stderr, "ZMQ unknown message type: %s\n", msg_type);
         }
     }
-    fprintf(stderr, "ZMQ ded\n");
+    zmq_send(socket, "P_DE", 4, 0);
+    zmq_close(socket);
+    zmq_ctx_destroy(context);
+    socket = NULL;
+    context = NULL;
   }
   return;
 }
