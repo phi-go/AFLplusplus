@@ -19,6 +19,7 @@
    This code is the rewrite of afl-as.h's main_payload.
 
 */
+#define _GNU_SOURCE
 
 #ifdef __ANDROID__
 #include "android-ashmem.h"
@@ -37,6 +38,7 @@
 #include <stdint.h>
 #include <errno.h>
 
+
 #include <zmq.h>
 #include <sys/time.h>
 #include <time.h>
@@ -45,6 +47,9 @@
 #include <sys/shm.h>
 #include <sys/wait.h>
 #include <sys/types.h>
+#include <sys/mman.h>
+
+#include <ucontext.h>
 
 /* This is a somewhat ugly hack for the experimental 'trace-pc-guard' mode.
    Basically, we need to make sure that the forkserver is initialized after
@@ -288,6 +293,21 @@ static void __afl_start_zmqserver(void) {
   return;
 }
 
+void sigtrap_handler(int signo, siginfo_t *si, void* arg)
+{
+  assert(signo == SIGTRAP);
+  ucontext_t *ctx = (ucontext_t *)arg;
+  printf("RIP is %llx\n", ctx->uc_mcontext.gregs[REG_RIP]);
+  uint8_t* rip = ctx->uc_mcontext.gregs[REG_RIP]-1;
+  uint8_t* base = rip - ((uint64_t)rip)%4096;
+  assert(mprotect((void*)base, 4096 , PROT_READ|PROT_WRITE|PROT_EXEC )==0);
+  *rip=0x90; // replace int 3 by nop so we only have the interrupt once
+  assert(mprotect((void*)base, 4096 , PROT_READ|PROT_EXEC )==0);
+  ctx->uc_mcontext.gregs[REG_RIP] = rip;
+}
+
+
+
 /* Fork server logic. */
 
 static void __afl_start_forkserver(void) {
@@ -303,6 +323,10 @@ static void __afl_start_forkserver(void) {
 
   if (write(FORKSRV_FD + 1, tmp, 4) != 4) return;
   __afl_start_zmqserver();
+  struct sigaction action;
+  action.sa_sigaction = &sigtrap_handler;
+  action.sa_flags = SA_SIGINFO;
+  sigaction(SIGTRAP, &action, NULL);
 
   while (1) {
 

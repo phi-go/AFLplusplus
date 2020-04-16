@@ -48,6 +48,7 @@ typedef long double max_align_t;
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
@@ -294,6 +295,10 @@ bool AFLCoverage::runOnModule(Module &M) {
   /* Instrument all the things! */
 
   int inst_blocks = 0;
+  InlineAsm *IA =
+    InlineAsm::get(FunctionType::get(Type::getVoidTy(C), false), "nop", "", true,
+                    /* IsAlignStack */ false, InlineAsm::AsmDialect::AD_Intel);
+
 
   for (auto &F : M) {
 
@@ -303,7 +308,9 @@ bool AFLCoverage::runOnModule(Module &M) {
 
       BasicBlock::iterator IP = BB.getFirstInsertionPt();
       IRBuilder<>          IRB(&(*IP));
-
+      CallInst *AICall = IRB.CreateCall(IA, {}, "auto_ijon_annotation");
+      AICall->addAttribute(AttributeList::FunctionIndex,
+                           Attribute::NoUnwind);
       if (!myWhitelist.empty()) {
 
         bool instrumentBlock = false;
