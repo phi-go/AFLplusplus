@@ -291,8 +291,6 @@ static void __afl_start_zmqserver(void) {
 /* Fork server logic. */
 
 static void __afl_start_forkserver(void) {
-  __afl_start_zmqserver();
-
   static u8 tmp[4];
   s32       child_pid;
 
@@ -304,6 +302,7 @@ static void __afl_start_forkserver(void) {
      assume we're not running in forkserver mode and just execute program. */
 
   if (write(FORKSRV_FD + 1, tmp, 4) != 4) return;
+  __afl_start_zmqserver();
 
   while (1) {
 
@@ -337,6 +336,9 @@ static void __afl_start_forkserver(void) {
       if (!child_pid) {
 
         signal(SIGCHLD, old_sigchld_handler);
+
+        if (socket) zmq_close(socket);
+        if (context) zmq_ctx_destroy(context);
 
         close(FORKSRV_FD);
         close(FORKSRV_FD + 1);

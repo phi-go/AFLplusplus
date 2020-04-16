@@ -763,8 +763,6 @@ int main(int argc, char **argv_orig, char **envp) {
 
   ACTF("Getting to work...");
 
-  connect_zmq(afl);
-
   switch (afl->schedule) {
 
     case FAST: OKF("Using exponential power schedule (FAST)"); break;
@@ -1037,6 +1035,8 @@ int main(int argc, char **argv_orig, char **envp) {
     if (afl->stop_soon) goto stop_fuzzing;
 
   }
+
+  connect_zmq(afl);
 
   // real start time, we reset, so this works correctly with -V
   afl->start_time = get_cur_time();
