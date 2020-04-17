@@ -162,7 +162,7 @@ static void afl_fauxsrv_execv(afl_forkserver_t *fsrv, char **argv) {
 
 void afl_fsrv_start(afl_forkserver_t *fsrv, char **argv) {
 
-  int st_pipe[2], ctl_pipe[2];
+  int st_pipe[2], ctl_pipe[2], cmd_write_pipe[2], cmd_read_pipe[2];
   int status;
   s32 rlen;
 
@@ -170,7 +170,8 @@ void afl_fsrv_start(afl_forkserver_t *fsrv, char **argv) {
 
   if (!getenv("AFL_QUIET")) ACTF("Spinning up the fork server...");
 
-  if (pipe(st_pipe) || pipe(ctl_pipe)) PFATAL("pipe() failed");
+  if (pipe(st_pipe) || pipe(ctl_pipe) ||
+      pipe(cmd_write_pipe) || pipe(cmd_read_pipe)) PFATAL("pipe() failed");
 
   fsrv->child_timed_out = 0;
   fsrv->fsrv_pid = fork();
@@ -186,9 +187,9 @@ void afl_fsrv_start(afl_forkserver_t *fsrv, char **argv) {
     /* Umpf. On OpenBSD, the default fd limit for root users is set to
        soft 128. Let's try to fix that... */
 
-    if (!getrlimit(RLIMIT_NOFILE, &r) && r.rlim_cur < FORKSRV_FD + 2) {
+    if (!getrlimit(RLIMIT_NOFILE, &r) && r.rlim_cur < FORKSRV_FD + 4) {
 
-      r.rlim_cur = FORKSRV_FD + 2;
+      r.rlim_cur = FORKSRV_FD + 4;
       setrlimit(RLIMIT_NOFILE, &r);                        /* Ignore errors */
 
     }
@@ -242,11 +243,17 @@ void afl_fsrv_start(afl_forkserver_t *fsrv, char **argv) {
 
     if (dup2(ctl_pipe[0], FORKSRV_FD) < 0) PFATAL("dup2() failed");
     if (dup2(st_pipe[1], FORKSRV_FD + 1) < 0) PFATAL("dup2() failed");
+    if (dup2(cmd_write_pipe[0], FORKSRV_FD + 2) < 0) PFATAL("dup2() failed");
+    if (dup2(cmd_read_pipe[1], FORKSRV_FD + 3) < 0) PFATAL("dup2() failed");
 
     close(ctl_pipe[0]);
     close(ctl_pipe[1]);
     close(st_pipe[0]);
     close(st_pipe[1]);
+    close(cmd_write_pipe[0]);
+    close(cmd_write_pipe[1]);
+    close(cmd_read_pipe[0]);
+    close(cmd_read_pipe[1]);
 
     close(fsrv->out_dir_fd);
     close(fsrv->dev_null_fd);
@@ -306,9 +313,13 @@ void afl_fsrv_start(afl_forkserver_t *fsrv, char **argv) {
 
   close(ctl_pipe[0]);
   close(st_pipe[1]);
+  close(cmd_write_pipe[0]);
+  close(cmd_read_pipe[1]);
 
   fsrv->fsrv_ctl_fd = ctl_pipe[1];
   fsrv->fsrv_st_fd = st_pipe[0];
+  fsrv->fsrv_cmdw_fd = cmd_write_pipe[1];
+  fsrv->fsrv_cmdr_fd = cmd_read_pipe[0];
 
   /* Wait for the fork server to come up, but don't wait too long. */
 

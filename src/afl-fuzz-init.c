@@ -2218,7 +2218,16 @@ void disconnect_zmq(afl_state_t * afl) {
     zmq_ctx_destroy(afl->zmq_context);
 }
 
-void   zmq_send_file_path(afl_state_t * afl, char * file_path, u64 execs) {
+static int64_t __zmq_has_more(afl_state_t * afl) {
+  int64_t more = 0;
+  size_t more_size = sizeof(more);
+  if (zmq_getsockopt(afl->zmq_socket, ZMQ_RCVMORE, &more, &more_size) != 0) {
+    fprintf(stderr, "ZMQ getsockopt: %s\n", zmq_strerror(errno));
+  }
+  return more;
+}
+
+void zmq_send_file_path(afl_state_t * afl, char * file_path, u64 execs) {
   if (afl->zmq_socket) {
     if (zmq_send(afl->zmq_socket, "F_QX", 4, ZMQ_SNDMORE) == -1) {
       fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
@@ -2228,6 +2237,78 @@ void   zmq_send_file_path(afl_state_t * afl, char * file_path, u64 execs) {
     }
     if (zmq_send(afl->zmq_socket, file_path, strlen(file_path), 0) == -1) {
       fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
+    }
+  }
+}
+
+struct BBReq {
+  int cmd;
+  intptr_t pos;
+  int size;
+};
+
+static void __zmq_bb_req(afl_state_t * afl) {
+  const int MAX_BB_SIZE = 1024;
+  if (!__zmq_has_more(afl)) {
+    fprintf(stderr, "ZMQ expected more message parts for bb req but there are none\n");
+    return;
+  }
+
+  char bb_content [MAX_BB_SIZE];
+  struct BBReq req;
+  req.cmd = 1;
+  if (zmq_recv(afl->zmq_socket, &req.pos, sizeof(req.pos), 0) == -1) {
+    fprintf(stderr, "ZMQ recv: %s\n", zmq_strerror(errno));
+  }
+  if (!__zmq_has_more(afl)) {
+    fprintf(stderr, "ZMQ expected more message parts for bb req but there are none\n");
+    return;
+  }
+  if (zmq_recv(afl->zmq_socket, &req.size, sizeof(req.size), 0) == -1) {
+    fprintf(stderr, "ZMQ recv: %s\n", zmq_strerror(errno));
+  }
+  if (req.size > MAX_BB_SIZE) {
+    FATAL("BB size is too large %d", req.size);
+  }
+
+  // send bb req to frk_server
+  // fprintf(stderr, "%zd %d %lx %d\n", sizeof(struct BBReq), req.cmd, req.pos, req.size);
+  if ((write(afl->fsrv.fsrv_cmdw_fd, &req, sizeof(req)) != sizeof(req))) {
+    FATAL("Failed command write\n");
+  }
+  // get reply from frk_server
+  if ((read(afl->fsrv.fsrv_cmdr_fd, &bb_content, req.size) != req.size)) {
+    FATAL("Failed bb read");
+  }
+
+  // send reply
+  if (zmq_send(afl->zmq_socket, "P_BB", 4, ZMQ_SNDMORE) == -1) {
+    fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
+  }
+  if (zmq_send(afl->zmq_socket, &req.pos, sizeof(req.pos), ZMQ_SNDMORE) == -1) {
+    fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
+  }
+  if (zmq_send(afl->zmq_socket, &req.size, sizeof(req.size), ZMQ_SNDMORE) == -1) {
+    fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
+  }
+  if (zmq_send(afl->zmq_socket, &bb_content, req.size, 0) == -1) {
+    fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
+  }
+}
+
+void zmq_handle_commands(afl_state_t * afl) {
+  if (afl->zmq_socket) {
+    while (1) {
+      char msg_type [5] = {0};
+      if (zmq_recv(afl->zmq_socket, msg_type, 4, ZMQ_NOBLOCK) == -1) {
+        if (errno == EAGAIN) break;
+        fprintf(stderr, "ZMQ recv: %s\n", zmq_strerror(errno));
+      }
+      if (strncmp("BB_R", msg_type, 4) == 0) {
+        __zmq_bb_req(afl);
+      } else {
+        fprintf(stderr, "ZMQ unknown message type: %s\n", msg_type);
+      }
     }
   }
 }

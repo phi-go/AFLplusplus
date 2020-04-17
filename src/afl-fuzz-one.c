@@ -2360,6 +2360,7 @@ abandon_entry:
 
   munmap(orig_in, afl->queue_cur->len);
   zmq_send_file_path(afl, afl->queue_cur->fname, afl->total_execs - num_exec_start);
+  zmq_handle_commands(afl);
   return ret_val;
 
 #undef FLIP_BIT

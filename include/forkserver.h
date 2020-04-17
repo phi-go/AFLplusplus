@@ -48,7 +48,9 @@ typedef struct afl_forkserver {
 #endif
       dev_null_fd,                      /* Persistent fd for /dev/null      */
       fsrv_ctl_fd,                      /* Fork server control pipe (write) */
-      fsrv_st_fd;                       /* Fork server status pipe (read)   */
+      fsrv_st_fd,                       /* Fork server status pipe (read)   */
+      fsrv_cmdw_fd,                     /* Fork server command pipe (write) */
+      fsrv_cmdr_fd;                     /* Fork server command pipe (read) */
 
   u32 exec_tmout;                       /* Configurable exec timeout (ms)   */
   u64 mem_limit;                        /* Memory cap for child (MB)        */

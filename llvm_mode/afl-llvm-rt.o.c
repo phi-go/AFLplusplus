@@ -39,7 +39,6 @@
 #include <errno.h>
 
 
-#include <zmq.h>
 #include <sys/time.h>
 #include <time.h>
 
@@ -186,113 +185,6 @@ static void __afl_map_shm(void) {
 
 }
 
-
-static void * context = NULL;
-static void * socket = NULL;
-
-static void __connect_zmq(void) {
-  const char * afl_zmq_url = getenv("IJON_ZMQ_FUZZER_URL");
-  if (!afl_zmq_url) {
-    return;
-  }
-  assert(context == NULL && socket == NULL);
-  char zmq_id [128];
-  char time_str[26];
-  struct tm* tm_info;
-  struct timeval tv;
-  gettimeofday(&tv, NULL);
-  tm_info = localtime(&tv.tv_sec);
-  strftime(time_str, 26, "%Y:%m:%d-%H:%M:%S", tm_info);
-  snprintf(zmq_id, 128, "P_%d_%s", getpid(), time_str);
-  context = zmq_ctx_new();
-  socket = zmq_socket(context, ZMQ_DEALER);
-  zmq_setsockopt(socket, ZMQ_IDENTITY, zmq_id, strlen(zmq_id));
-
-  if (zmq_connect(socket, afl_zmq_url) != 0) {
-    fprintf(stderr, "ZMQ error: %s\n", zmq_strerror(errno));
-    context = NULL;
-    socket = NULL;
-    return;
-  } else {
-    const char * msg = "P_UP";
-    zmq_send(socket, msg, strlen(msg), 0);
-  }
-}
-
-
-static int64_t __zmq_has_more() {
-  int64_t more = 0;
-  size_t more_size = sizeof(more);
-  if (zmq_getsockopt(socket, ZMQ_RCVMORE, &more, &more_size) != 0) {
-    fprintf(stderr, "ZMQ getsockopt: %s\n", zmq_strerror(errno));
-  }
-  return more;
-}
-
-
-static void __zmq_bb_req() {
-  if (!__zmq_has_more()) {
-    fprintf(stderr, "ZMQ expected more message parts for bb req but there are none\n");
-    return;
-  }
-
-  void * pos;
-  unsigned int size;
-  if (zmq_recv(socket, &pos, sizeof(pos), 0) == -1) {
-    fprintf(stderr, "ZMQ recv: %s\n", zmq_strerror(errno));
-  }
-  if (!__zmq_has_more()) {
-    fprintf(stderr, "ZMQ expected more message parts for bb req but there are none\n");
-    return;
-  }
-  if (zmq_recv(socket, &size, sizeof(size), 0) == -1) {
-    fprintf(stderr, "ZMQ recv: %s\n", zmq_strerror(errno));
-  }
-  // send reply
-  if (zmq_send(socket, "P_BB", 4, ZMQ_SNDMORE) == -1) {
-    fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
-  }
-  if (zmq_send(socket, &pos, sizeof(pos), ZMQ_SNDMORE) == -1) {
-    fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
-  }
-  if (zmq_send(socket, &size, sizeof(size), ZMQ_SNDMORE) == -1) {
-    fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
-  }
-  if (zmq_send(socket, pos, size, 0) == -1) {
-    fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
-  }
-}
-
-/* ZMQ fork */
-static void __afl_start_zmqserver(void) {
-  s32 child_pid = fork();
-  if (child_pid < 0) _exit(1);
-
-  if (!child_pid) { // in child
-    signal(SIGCHLD, SIG_DFL);
-    __connect_zmq();
-    char msg_type [5] = {0};
-    while (socket) {
-        if (zmq_recv(socket, msg_type, 4, 0) == -1) {
-          fprintf(stderr, "ZMQ recv: %s\n", zmq_strerror(errno));
-        }
-        if (strncmp("BB_R", msg_type, 4) == 0) {
-          __zmq_bb_req();
-        } else if (strncmp("PDIE", msg_type, 4) == 0) {
-          break;
-        } else {
-          fprintf(stderr, "ZMQ unknown message type: %s\n", msg_type);
-        }
-    }
-    zmq_send(socket, "P_DE", 4, 0);
-    zmq_close(socket);
-    zmq_ctx_destroy(context);
-    socket = NULL;
-    context = NULL;
-  }
-  return;
-}
-
 void sigtrap_handler(int signo, siginfo_t *si, void* arg)
 {
   assert(signo == SIGTRAP);
@@ -306,7 +198,11 @@ void sigtrap_handler(int signo, siginfo_t *si, void* arg)
   ctx->uc_mcontext.gregs[REG_RIP] = rip;
 }
 
-
+struct BBReq {
+  int cmd;
+  intptr_t pos;
+  int size;
+};
 
 /* Fork server logic. */
 
@@ -322,7 +218,6 @@ static void __afl_start_forkserver(void) {
      assume we're not running in forkserver mode and just execute program. */
 
   if (write(FORKSRV_FD + 1, tmp, 4) != 4) return;
-  __afl_start_zmqserver();
   struct sigaction action;
   action.sa_sigaction = &sigtrap_handler;
   action.sa_flags = SA_SIGINFO;
@@ -330,10 +225,31 @@ static void __afl_start_forkserver(void) {
 
   while (1) {
 
+    fd_set rfds;
     u32 was_killed;
     int status;
 
     /* Wait for parent by reading from the pipe. Abort if read fails. */
+    FD_ZERO(&rfds);
+    FD_SET(FORKSRV_FD, &rfds);
+    FD_SET(FORKSRV_FD + 2, &rfds);
+    if (select(FORKSRV_FD + 2 + 1, &rfds, NULL, NULL, NULL) == -1) {
+      perror("select()");
+    }
+
+    // Received a command and not a request to fuzz
+    if (FD_ISSET(FORKSRV_FD + 2, &rfds)) {
+      struct BBReq req;
+      if ((read(FORKSRV_FD + 2, &req, sizeof(req)) != sizeof(req))) {
+        fprintf(stderr, "command read failed %d %lx %d\n", req.cmd, req.pos, req.size);
+        _exit(1);
+      }
+      if ((write(FORKSRV_FD + 3, (void *)req.pos, req.size) != req.size)) {
+        fprintf(stderr, "command write %d %lx %d\n", req.cmd, req.pos, req.size);
+        _exit(1);
+      }
+      continue;
+    }
 
     if (read(FORKSRV_FD, &was_killed, 4) != 4) _exit(1);
 
@@ -361,11 +277,10 @@ static void __afl_start_forkserver(void) {
 
         signal(SIGCHLD, old_sigchld_handler);
 
-        if (socket) zmq_close(socket);
-        if (context) zmq_ctx_destroy(context);
-
         close(FORKSRV_FD);
         close(FORKSRV_FD + 1);
+        close(FORKSRV_FD + 2);
+        close(FORKSRV_FD + 3);
         return;
 
       }
