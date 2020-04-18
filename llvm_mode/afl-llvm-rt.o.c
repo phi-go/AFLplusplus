@@ -185,11 +185,23 @@ static void __afl_map_shm(void) {
 
 }
 
+#define read_from_command_pipe(V) \
+    if ((read(FORKSRV_FD + 2, &V, sizeof(V)) != sizeof(V))) { \
+      fprintf(stderr, "command read failed %s:%d\n", __FILE__, __LINE__); \
+      _exit(1); \
+    }
+
+#define write_to_command_pipe(V, S) \
+    if ((write(FORKSRV_FD + 3, V, S) != S)) { \
+      fprintf(stderr, "command write failed %s:%d\n", __FILE__, __LINE__); \
+      _exit(1); \
+    }
+
 void sigtrap_handler(int signo, siginfo_t *si, void* arg)
 {
   assert(signo == SIGTRAP);
   ucontext_t *ctx = (ucontext_t *)arg;
-  printf("RIP is %llx\n", ctx->uc_mcontext.gregs[REG_RIP]);
+  printf("INT3@%llx ", ctx->uc_mcontext.gregs[REG_RIP] - 1);
   uint8_t* rip = ctx->uc_mcontext.gregs[REG_RIP]-1;
   uint8_t* base = rip - ((uint64_t)rip)%4096;
   assert(mprotect((void*)base, 4096 , PROT_READ|PROT_WRITE|PROT_EXEC )==0);
@@ -199,10 +211,37 @@ void sigtrap_handler(int signo, siginfo_t *si, void* arg)
 }
 
 struct BBReq {
-  int cmd;
   intptr_t pos;
   int size;
 };
+
+static void __afl_handle_bb_req(void) {
+    struct BBReq req;
+    read_from_command_pipe(req);
+    write_to_command_pipe((void *)req.pos, req.size);
+}
+
+static void __afl_handle_ann_req(void) {
+  uint8_t * pos = NULL;
+  read_from_command_pipe(pos);
+  fprintf(stderr, "EANR req %p\n", pos);
+  uint8_t* base = pos - ((uint64_t)pos)%4096;
+  assert(mprotect((void*)base, 4096 , PROT_READ|PROT_WRITE|PROT_EXEC )==0);
+  *pos = 0xcc;
+  assert(mprotect((void*)base, 4096 , PROT_READ|PROT_EXEC )==0);
+  // TODO return command success?
+}
+
+static void __afl_handle_deann_req(void) {
+  uint8_t * pos = NULL;
+  read_from_command_pipe(pos);
+  fprintf(stderr, "DANR req %p\n", pos);
+  uint8_t* base = pos - ((uint64_t)pos)%4096;
+  assert(mprotect((void*)base, 4096 , PROT_READ|PROT_WRITE|PROT_EXEC )==0);
+  *pos = 0x90;
+  assert(mprotect((void*)base, 4096 , PROT_READ|PROT_EXEC )==0);
+  // TODO return command success?
+}
 
 /* Fork server logic. */
 
@@ -239,14 +278,20 @@ static void __afl_start_forkserver(void) {
 
     // Received a command and not a request to fuzz
     if (FD_ISSET(FORKSRV_FD + 2, &rfds)) {
-      struct BBReq req;
-      if ((read(FORKSRV_FD + 2, &req, sizeof(req)) != sizeof(req))) {
-        fprintf(stderr, "command read failed %d %lx %d\n", req.cmd, req.pos, req.size);
-        _exit(1);
-      }
-      if ((write(FORKSRV_FD + 3, (void *)req.pos, req.size) != req.size)) {
-        fprintf(stderr, "command write %d %lx %d\n", req.cmd, req.pos, req.size);
-        _exit(1);
+      char cmd[4] = {0};
+      read_from_command_pipe(cmd);
+      // if ((read(FORKSRV_FD + 2, &cmd, 4) != 4)) {
+      //   fprintf(stderr, "command read failed %s\n", cmd);
+      //   _exit(1);
+      // }
+      if (strncmp("BB_R", cmd, 4) == 0) {
+        __afl_handle_bb_req();
+      } else if (strncmp("EANR", cmd, 4) == 0) {
+        __afl_handle_ann_req();
+      } else if (strncmp("DANR", cmd, 4) == 0) {
+        __afl_handle_deann_req();
+      } else {
+        fprintf(stderr, "fuzzee unknown command: %s\n", cmd);
       }
       continue;
     }

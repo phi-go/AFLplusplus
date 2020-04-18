@@ -2227,85 +2227,109 @@ static int64_t __zmq_has_more(afl_state_t * afl) {
   return more;
 }
 
+#define z_send(V, S, O) \
+    if (zmq_send(afl->zmq_socket, V, S, O) == -1) { \
+      FATAL("ZMQ send error: %s in %s:%d\n", zmq_strerror(errno), __FILE__, __LINE__); \
+    }
+
+#define z_read(V) \
+  if (!__zmq_has_more(afl)) { \
+    FATAL("ZMQ expected more message parts %s:%d", __FILE__, __LINE__); \
+  } \
+  if (zmq_recv(afl->zmq_socket, V, sizeof(V), 0) == -1) { \
+    FATAL("ZMQ recv error: %s in %s:%d\n", zmq_strerror(errno), __FILE__, __LINE__); \
+  }
+
+#define write_to_command_pipe(V, S) \
+  if ((write(afl->fsrv.fsrv_cmdw_fd, V, S) != S)) { \
+    FATAL("command write failed %s:%d\n", __FILE__, __LINE__); \
+  }
+
+#define read_from_command_pipe(V, S) \
+  if ((read(afl->fsrv.fsrv_cmdr_fd, V, S) != S)) { \
+    FATAL("command read failed %s:%d\n", __FILE__, __LINE__); \
+  }
+
 void zmq_send_file_path(afl_state_t * afl, char * file_path, u64 execs) {
   if (afl->zmq_socket) {
-    if (zmq_send(afl->zmq_socket, "F_QX", 4, ZMQ_SNDMORE) == -1) {
-      fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
-    }
-    if (zmq_send(afl->zmq_socket, &execs, sizeof(execs), ZMQ_SNDMORE) == -1) {
-      fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
-    }
-    if (zmq_send(afl->zmq_socket, file_path, strlen(file_path), 0) == -1) {
-      fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
-    }
+    z_send("F_QX", 4, ZMQ_SNDMORE);
+    z_send(&execs, sizeof(execs), ZMQ_SNDMORE);
+    z_send(file_path, strlen(file_path), 0);
   }
 }
 
 struct BBReq {
-  int cmd;
   intptr_t pos;
   int size;
 };
 
-static void __zmq_bb_req(afl_state_t * afl) {
-  const int MAX_BB_SIZE = 1024;
-  if (!__zmq_has_more(afl)) {
-    fprintf(stderr, "ZMQ expected more message parts for bb req but there are none\n");
-    return;
-  }
+#define MAX_BB_SIZE 4096
 
+static void __zmq_bb_req(afl_state_t * afl) {
   char bb_content [MAX_BB_SIZE];
   struct BBReq req;
-  req.cmd = 1;
-  if (zmq_recv(afl->zmq_socket, &req.pos, sizeof(req.pos), 0) == -1) {
-    fprintf(stderr, "ZMQ recv: %s\n", zmq_strerror(errno));
-  }
-  if (!__zmq_has_more(afl)) {
-    fprintf(stderr, "ZMQ expected more message parts for bb req but there are none\n");
-    return;
-  }
-  if (zmq_recv(afl->zmq_socket, &req.size, sizeof(req.size), 0) == -1) {
-    fprintf(stderr, "ZMQ recv: %s\n", zmq_strerror(errno));
-  }
+  z_read(&req.pos);
+  z_read(&req.size);
   if (req.size > MAX_BB_SIZE) {
     FATAL("BB size is too large %d", req.size);
   }
 
   // send bb req to frk_server
-  // fprintf(stderr, "%zd %d %lx %d\n", sizeof(struct BBReq), req.cmd, req.pos, req.size);
-  if ((write(afl->fsrv.fsrv_cmdw_fd, &req, sizeof(req)) != sizeof(req))) {
-    FATAL("Failed command write\n");
-  }
+  char cmd[4] = "BB_R";
+  write_to_command_pipe(&cmd, 4);
+  write_to_command_pipe(&req, sizeof(req));
   // get reply from frk_server
-  if ((read(afl->fsrv.fsrv_cmdr_fd, &bb_content, req.size) != req.size)) {
-    FATAL("Failed bb read");
-  }
+  read_from_command_pipe(&bb_content, req.size);
 
   // send reply
-  if (zmq_send(afl->zmq_socket, "P_BB", 4, ZMQ_SNDMORE) == -1) {
-    fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
-  }
-  if (zmq_send(afl->zmq_socket, &req.pos, sizeof(req.pos), ZMQ_SNDMORE) == -1) {
-    fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
-  }
-  if (zmq_send(afl->zmq_socket, &req.size, sizeof(req.size), ZMQ_SNDMORE) == -1) {
-    fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
-  }
-  if (zmq_send(afl->zmq_socket, &bb_content, req.size, 0) == -1) {
-    fprintf(stderr, "ZMQ send: %s\n", zmq_strerror(errno));
-  }
+  z_send("P_BB", 4, ZMQ_SNDMORE);
+  z_send(&req.pos, sizeof(req.pos), ZMQ_SNDMORE);
+  z_send(&req.size, sizeof(req.size), ZMQ_SNDMORE);
+  z_send(&bb_content, req.size, 0);
 }
+
+static void __zmq_annotation_req(afl_state_t * afl) {
+  // const int MAX_ANN_SIZE = 1024;
+  unsigned long pos;
+  char annotation [1024] = {0};
+  // int ann_len;
+  z_read(&pos);
+  z_read(&annotation);
+  fprintf(stderr, "ZMQ ann: %lx %s\n", pos, annotation);
+
+  // send command
+  char cmd[4] = "EANR";
+  write_to_command_pipe(&cmd, 4);
+  write_to_command_pipe(&pos, sizeof(pos));
+}
+
+static void __zmq_deannotation_req(afl_state_t * afl) {
+  unsigned long pos;
+  z_read(&pos)
+  fprintf(stderr, "ZMQ deann: %lx\n", pos);
+
+  // send command
+  char cmd[4] = "DANR";
+  write_to_command_pipe(&cmd, sizeof(cmd));
+  write_to_command_pipe(&pos, sizeof(pos));
+}
+
+#define MSG_SIZE 4
 
 void zmq_handle_commands(afl_state_t * afl) {
   if (afl->zmq_socket) {
     while (1) {
-      char msg_type [5] = {0};
-      if (zmq_recv(afl->zmq_socket, msg_type, 4, ZMQ_NOBLOCK) == -1) {
+      char msg_type [MSG_SIZE] = {0};
+      if (zmq_recv(afl->zmq_socket, msg_type, MSG_SIZE, ZMQ_NOBLOCK) == -1) {
         if (errno == EAGAIN) break;
         fprintf(stderr, "ZMQ recv: %s\n", zmq_strerror(errno));
       }
-      if (strncmp("BB_R", msg_type, 4) == 0) {
+      if (strncmp("BB_R", msg_type, MSG_SIZE) == 0) {
         __zmq_bb_req(afl);
+      } else if (strncmp("EANR", msg_type, MSG_SIZE) == 0) {
+        __zmq_annotation_req(afl);
+      } else if (strncmp("DANR", msg_type, MSG_SIZE) == 0) {
+        __zmq_deannotation_req(afl);
       } else {
         fprintf(stderr, "ZMQ unknown message type: %s\n", msg_type);
       }
