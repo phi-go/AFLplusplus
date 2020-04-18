@@ -4,7 +4,7 @@
 # ------------------------------------------------
 #
 # Originally written by Nathan Voss <njvoss99@gmail.com>
-# 
+#
 # Adapted from code by Andrew Griffiths <agriffiths@google.com> and
 #                      Michal Zalewski
 #
@@ -24,7 +24,7 @@
 #
 # This script downloads, patches, and builds a version of Unicorn with
 # minor tweaks to allow Unicorn-emulated binaries to be run under
-# afl-fuzz. 
+# afl-fuzz.
 #
 # The modifications reside in patches/*. The standalone Unicorn library
 # will be written to /usr/lib/libunicornafl.so, and the Python bindings
@@ -32,6 +32,8 @@
 #
 # You must make sure that Unicorn Engine is not already installed before
 # running this script. If it is, please uninstall it first.
+
+UNICORNAFL_VERSION="$(cat ./UNICORNAFL_VERSION)"
 
 echo "================================================="
 echo "UnicornAFL build script"
@@ -46,7 +48,7 @@ if [ ! "$PLT" = "Linux" ] && [ ! "$PLT" = "Darwin" ] && [ ! "$PLT" = "FreeBSD" ]
 
   echo "[-] Error: Unicorn instrumentation is unsupported on $PLT."
   exit 1
-  
+
 fi
 
 if [ ! -f "../config.h" ]; then
@@ -107,8 +109,21 @@ done
 
 if ! type $EASY_INSTALL > /dev/null; then
 
-  # work around for unusual installs
-  if [ '!' -e /usr/lib/python2.7/dist-packages/easy_install.py ] && [ '!' -e /usr/local/lib/python2.7/dist-packages/easy_install.py ] && [ '!' -e /usr/pkg/lib/python2.7/dist-packages/easy_install.py ]; then
+  # work around for installs with executable easy_install
+  EASY_INSTALL_FOUND=0
+  MYPYTHONPATH=`python -v </dev/null 2>&1 >/dev/null | sed -n -e '/^# \/.*\/os.py/{ s/.*matches //; s/os.py$//; p}'`
+  for PATHCANDIDATE in \
+        "dist-packages/" \
+        "site-packages/"
+  do
+    if [ -e "${MYPYTHONPATH}/${PATHCANDIDATE}/easy_install.py" ] ; then
+
+      EASY_INSTALL_FOUND=1
+      break
+
+    fi
+  done
+  if [ '!' $EASY_INSTALL_FOUND ]; then
 
     echo "[-] Error: Python setup-tools not found. Run 'sudo apt-get install python-setuptools'."
     PREREQ_NOTFOUND=1
@@ -131,25 +146,38 @@ fi
 echo "[+] All checks passed!"
 
 echo "[*] Making sure unicornafl is checked out"
-rm -rf unicornafl # workaround for travis ... sadly ...
-#test -d unicorn && { cd unicorn && { git stash ; git pull ; cd .. ; } }
-test -d unicornafl || {
-   CNT=1
-   while [ '!' -d unicornafl -a "$CNT" -lt 4 ]; do
-     echo "Trying to clone unicornafl (attempt $CNT/3)"
-     git clone https://github.com/AFLplusplus/unicornafl
-     CNT=`expr "$CNT" + 1`
-   done
-}
+
+git status 1>/dev/null 2>/dev/null
+if [ $? -eq 0 ]; then
+  echo "[*] initializing unicornafl submodule"
+  git submodule init || exit 1
+  git submodule update 2>/dev/null # ignore errors
+else
+  echo "[*] cloning unicornafl"
+  rm -rf unicornafl # workaround for travis ... sadly ...
+  #test -d unicorn && { cd unicorn && { git stash ; git pull ; cd .. ; } }
+  test -d unicornafl || {
+    CNT=1
+    while [ '!' -d unicornafl -a "$CNT" -lt 4 ]; do
+      echo "Trying to clone unicornafl (attempt $CNT/3)"
+      git clone https://github.com/AFLplusplus/unicornafl
+      CNT=`expr "$CNT" + 1`
+    done
+  }
+fi
+
 test -d unicornafl || { echo "[-] not checked out, please install git or check your internet connection." ; exit 1 ; }
 echo "[+] Got unicornafl."
 
+cd "unicornafl" || exit 1
+echo "[*] Checking out $UNICORNAFL_VERSION"
+sh -c 'git stash && git stash drop' 1>/dev/null 2>/dev/null
+git checkout "$UNICORNAFL_VERSION" || exit 1
+
 echo "[*] making sure config.h matches"
-cp "../config.h" "./unicornafl/" || exit 1
+cp "../../config.h" "." || exit 1
 
 echo "[*] Configuring Unicorn build..."
-
-cd "unicornafl" || exit 1
 
 echo "[+] Configuration complete."
 
@@ -186,7 +214,7 @@ echo 0 | ../../../afl-showmap -U -m none -t 2000 -q -o .test-instr0 -- $PYTHONBI
 
 if [ -s .test-instr0 ]
 then
-  
+
   echo "[+] Instrumentation tests passed. "
   echo '[+] Make sure to adapt older scripts to `import unicornafl` and use `uc.afl_forkserver_start`'
   echo '    or `uc.afl_fuzz` to kick off fuzzing.'

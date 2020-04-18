@@ -27,7 +27,7 @@
 
 /* MOpt */
 
-int select_algorithm(afl_state_t *afl) {
+static int select_algorithm(afl_state_t *afl) {
 
   int i_puppet, j_puppet;
 
@@ -414,7 +414,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
   /* Map the test case into memory. */
 
   fd = open(afl->queue_cur->fname, O_RDONLY);
-  num_exec_start = afl->total_execs;
+  num_exec_start = afl->fsrv.total_execs;
 
   if (unlikely(fd < 0)) PFATAL("Unable to open '%s'", afl->queue_cur->fname);
 
@@ -443,14 +443,14 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
   if (unlikely(afl->queue_cur->cal_failed)) {
 
-    u8 res = FAULT_TMOUT;
+    u8 res = FSRV_RUN_TMOUT;
 
     if (afl->queue_cur->cal_failed < CAL_CHANCES) {
 
       res =
           calibrate_case(afl, afl->queue_cur, in_buf, afl->queue_cycle - 1, 0);
 
-      if (unlikely(res == FAULT_ERROR))
+      if (unlikely(res == FSRV_RUN_ERROR))
         FATAL("Unable to execute target application");
 
     }
@@ -472,7 +472,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
     u8 res = trim_case(afl, afl->queue_cur, in_buf);
 
-    if (unlikely(res == FAULT_ERROR))
+    if (unlikely(res == FSRV_RUN_ERROR))
       FATAL("Unable to execute target application");
 
     if (unlikely(afl->stop_soon)) {
@@ -502,7 +502,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
   if (unlikely(afl->use_radamsa > 1)) goto radamsa_stage;
 
-  if (afl->shm.cmplog_mode) {
+  if (afl->shm.cmplog_mode && !afl->queue_cur->fully_colorized) {
 
     if (input_to_state_stage(afl, in_buf, out_buf, len,
                              afl->queue_cur->exec_cksum))
@@ -602,7 +602,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
     if (!afl->dumb_mode && (afl->stage_cur & 7) == 7) {
 
-      u32 cksum = hash32(afl->fsrv.trace_bits, MAP_SIZE, HASH_CONST);
+      u32 cksum = hash32(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
 
       if (afl->stage_cur == afl->stage_max - 1 && cksum == prev_cksum) {
 
@@ -614,7 +614,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
         ++a_len;
 
         if (a_len >= MIN_AUTO_EXTRA && a_len <= MAX_AUTO_EXTRA)
-          maybe_add_auto(afl, a_collect, a_len);
+          maybe_add_auto((u8 *)afl, a_collect, a_len);
 
       } else if (cksum != prev_cksum) {
 
@@ -622,7 +622,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
            worthwhile queued up, and collect that if the answer is yes. */
 
         if (a_len >= MIN_AUTO_EXTRA && a_len <= MAX_AUTO_EXTRA)
-          maybe_add_auto(afl, a_collect, a_len);
+          maybe_add_auto((u8 *)afl, a_collect, a_len);
 
         a_len = 0;
         prev_cksum = cksum;
@@ -762,7 +762,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
          without wasting time on checksums. */
 
       if (!afl->dumb_mode && len >= EFF_MIN_LEN)
-        cksum = hash32(afl->fsrv.trace_bits, MAP_SIZE, HASH_CONST);
+        cksum = hash32(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
       else
         cksum = ~afl->queue_cur->exec_cksum;
 
@@ -2359,7 +2359,7 @@ abandon_entry:
   ++afl->queue_cur->fuzz_level;
 
   munmap(orig_in, afl->queue_cur->len);
-  zmq_send_file_path(afl, afl->queue_cur->fname, afl->total_execs - num_exec_start);
+  zmq_send_file_path(afl, afl->queue_cur->fname, afl->fsrv.total_execs - num_exec_start);
   zmq_handle_commands(afl);
   return ret_val;
 
@@ -2368,7 +2368,7 @@ abandon_entry:
 }
 
 /* MOpt mode */
-u8 mopt_common_fuzzing(afl_state_t *afl, MOpt_globals_t MOpt_globals) {
+static u8 mopt_common_fuzzing(afl_state_t *afl, MOpt_globals_t MOpt_globals) {
 
   if (!MOpt_globals.is_pilot_mode) {
 
@@ -2471,14 +2471,14 @@ u8 mopt_common_fuzzing(afl_state_t *afl, MOpt_globals_t MOpt_globals) {
 
   if (afl->queue_cur->cal_failed) {
 
-    u8 res = FAULT_TMOUT;
+    u8 res = FSRV_RUN_TMOUT;
 
     if (afl->queue_cur->cal_failed < CAL_CHANCES) {
 
       res =
           calibrate_case(afl, afl->queue_cur, in_buf, afl->queue_cycle - 1, 0);
 
-      if (res == FAULT_ERROR) FATAL("Unable to execute target application");
+      if (res == FSRV_RUN_ERROR) FATAL("Unable to execute target application");
 
     }
 
@@ -2499,7 +2499,7 @@ u8 mopt_common_fuzzing(afl_state_t *afl, MOpt_globals_t MOpt_globals) {
 
     u8 res = trim_case(afl, afl->queue_cur, in_buf);
 
-    if (res == FAULT_ERROR) FATAL("Unable to execute target application");
+    if (res == FSRV_RUN_ERROR) FATAL("Unable to execute target application");
 
     if (afl->stop_soon) {
 
@@ -2524,6 +2524,28 @@ u8 mopt_common_fuzzing(afl_state_t *afl, MOpt_globals_t MOpt_globals) {
 
   orig_perf = perf_score = calculate_score(afl, afl->queue_cur);
 
+  if (afl->shm.cmplog_mode && !afl->queue_cur->fully_colorized) {
+
+    if (input_to_state_stage(afl, in_buf, out_buf, len,
+                             afl->queue_cur->exec_cksum))
+      goto abandon_entry;
+
+  }
+
+  /* Go to pacemker fuzzing if MOpt is doing well */
+
+  cur_ms_lv = get_cur_time();
+  if (!(afl->key_puppet == 0 &&
+        ((cur_ms_lv - afl->last_path_time < afl->limit_time_puppet) ||
+         (afl->last_crash_time != 0 &&
+          cur_ms_lv - afl->last_crash_time < afl->limit_time_puppet) ||
+         afl->last_path_time == 0))) {
+
+    afl->key_puppet = 1;
+    goto pacemaker_fuzzing;
+
+  }
+
   /* Skip right away if -d is given, if we have done deterministic fuzzing on
      this entry ourselves (was_fuzzed), or if it has gone through deterministic
      testing in earlier, resumed runs (passed_det). */
@@ -2538,18 +2560,6 @@ u8 mopt_common_fuzzing(afl_state_t *afl, MOpt_globals_t MOpt_globals) {
   if (afl->master_max &&
       (afl->queue_cur->exec_cksum % afl->master_max) != afl->master_id - 1)
     goto havoc_stage;
-
-  cur_ms_lv = get_cur_time();
-  if (!(afl->key_puppet == 0 &&
-        ((cur_ms_lv - afl->last_path_time < afl->limit_time_puppet) ||
-         (afl->last_crash_time != 0 &&
-          cur_ms_lv - afl->last_crash_time < afl->limit_time_puppet) ||
-         afl->last_path_time == 0))) {
-
-    afl->key_puppet = 1;
-    goto pacemaker_fuzzing;
-
-  }
 
   doing_det = 1;
 
@@ -2617,7 +2627,7 @@ u8 mopt_common_fuzzing(afl_state_t *afl, MOpt_globals_t MOpt_globals) {
 
     if (!afl->dumb_mode && (afl->stage_cur & 7) == 7) {
 
-      u32 cksum = hash32(afl->fsrv.trace_bits, MAP_SIZE, HASH_CONST);
+      u32 cksum = hash32(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
 
       if (afl->stage_cur == afl->stage_max - 1 && cksum == prev_cksum) {
 
@@ -2629,7 +2639,7 @@ u8 mopt_common_fuzzing(afl_state_t *afl, MOpt_globals_t MOpt_globals) {
         ++a_len;
 
         if (a_len >= MIN_AUTO_EXTRA && a_len <= MAX_AUTO_EXTRA)
-          maybe_add_auto(afl, a_collect, a_len);
+          maybe_add_auto((u8 *)afl, a_collect, a_len);
 
       } else if (cksum != prev_cksum) {
 
@@ -2637,7 +2647,7 @@ u8 mopt_common_fuzzing(afl_state_t *afl, MOpt_globals_t MOpt_globals) {
            worthwhile queued up, and collect that if the answer is yes. */
 
         if (a_len >= MIN_AUTO_EXTRA && a_len <= MAX_AUTO_EXTRA)
-          maybe_add_auto(afl, a_collect, a_len);
+          maybe_add_auto((u8 *)afl, a_collect, a_len);
 
         a_len = 0;
         prev_cksum = cksum;
@@ -2777,7 +2787,7 @@ u8 mopt_common_fuzzing(afl_state_t *afl, MOpt_globals_t MOpt_globals) {
          without wasting time on checksums. */
 
       if (!afl->dumb_mode && len >= EFF_MIN_LEN)
-        cksum = hash32(afl->fsrv.trace_bits, MAP_SIZE, HASH_CONST);
+        cksum = hash32(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
       else
         cksum = ~afl->queue_cur->exec_cksum;
 
@@ -3595,7 +3605,6 @@ pacemaker_fuzzing:
   }
 
   s32 temp_len_puppet;
-  cur_ms_lv = get_cur_time();
 
   // for (; afl->swarm_now < swarm_num; ++afl->swarm_now)
   {
@@ -4169,8 +4178,6 @@ pacemaker_fuzzing:
                  afl->orig_hit_cnt_puppet))) {
 
           afl->key_puppet = 0;
-          cur_ms_lv = get_cur_time();
-          new_hit_cnt = afl->queued_paths + afl->unique_crashes;
           afl->orig_hit_cnt_puppet = 0;
           afl->last_limit_time_start = 0;
 
@@ -4379,7 +4386,7 @@ void pso_updating(afl_state_t *afl) {
 
 u8 fuzz_one(afl_state_t *afl) {
 
-  int key_val_lv = 0;
+  int key_val_lv_1 = 0, key_val_lv_2 = 0;
 
 #ifdef _AFL_DOCUMENT_MUTATIONS
 
@@ -4399,22 +4406,22 @@ u8 fuzz_one(afl_state_t *afl) {
 
 #endif
 
-  if (afl->limit_time_sig == 0) {
+  // if limit_time_sig == -1 then both are run after each other
 
-    key_val_lv = fuzz_one_original(afl);
+  if (afl->limit_time_sig <= 0) { key_val_lv_1 = fuzz_one_original(afl); }
 
-  } else {
+  if (afl->limit_time_sig != 0) {
 
     if (afl->key_module == 0)
-      key_val_lv = pilot_fuzzing(afl);
+      key_val_lv_2 = pilot_fuzzing(afl);
     else if (afl->key_module == 1)
-      key_val_lv = core_fuzzing(afl);
+      key_val_lv_2 = core_fuzzing(afl);
     else if (afl->key_module == 2)
       pso_updating(afl);
 
   }
 
-  return key_val_lv;
+  return (key_val_lv_1 | key_val_lv_2);
 
 #undef BUF_PARAMS
 

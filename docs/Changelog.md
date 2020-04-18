@@ -9,7 +9,36 @@ Want to stay in the loop on major new features? Join our mailing list by
 sending a mail to <afl-users+subscribe@googlegroups.com>.
 
 
-### Version ++2.62d (develop):
+### Version ++2.64d (develop):
+  - ...
+
+
+
+### Version ++2.64c (release):
+  - llvm_mode LTO mode:
+    - now requires llvm11 - but compiles all targets! :)
+    - autodictionary feature added, enable with `AFL_LLVM_LTO_AUTODICTIONARY`
+    - variable map size usage
+  - afl-fuzz:
+    - variable map size support added (only LTO mode can use this)
+    - snapshot feature usage now visible in UI
+    - Now setting `-L -1` will enable MOpt in parallel to normal mutation.
+      Additionally, this allows to run dictionaries, radamsa and cmplog.
+    - fix for cmplog/redqueen mode if stdin was used
+    - fix for writing a better plot_data file
+  - qemu_mode: fix for persistent mode (which would not terminate or get stuck)
+  - compare-transform/AFL_LLVM_LAF_TRANSFORM_COMPARES now transforms also
+    static global and local variable comparisons (cannot find all though)
+  - extended forkserver: map_size and more information is communicated to
+    afl-fuzz (and afl-fuzz acts accordingly)
+  - new environment variable: AFL_MAP_SIZE to specify the size of the shared map
+  - if AFL_CC/AFL_CXX is set but empty afl compilers did fail, fixed
+    (this bug is in vanilla afl too)
+  - added NO_PYTHON flag to disable python support when building afl-fuzz
+  - more refactoring
+
+
+### Version ++2.63c (release):
 
   ! the repository was moved from vanhauser-thc to AFLplusplus. It is now
     an own organisation :)
@@ -34,16 +63,23 @@ sending a mail to <afl-users+subscribe@googlegroups.com>.
                the last 5 queue entries
       - rare: puts focus on queue entries that hits rare branches, also ignores
               runtime
-  - llvm_mode: added Control Flow Integrity sanitizer (AFL_USE_CFISAN)
+  - llvm_mode: 
+    - added SNAPSHOT feature (using https://github.com/AFLplusplus/AFL-Snapshot-LKM)
+    - added Control Flow Integrity sanitizer (AFL_USE_CFISAN)
+    - added AFL_LLVM_INSTRUMENT option to control the instrumentation type
+      easier: DEFAULT, CFG (INSTRIM), LTO, CTX, NGRAM-x (x=2-16)
+    - made USE_TRACE_PC compile obsolete
   - LTO collision free instrumented added in llvm_mode with afl-clang-lto -
-    note that this mode is amazing, but quite some targets won't compile
+    this mode is amazing but requires you to build llvm 11 yourself
   - Added llvm_mode NGRAM prev_loc coverage by Adrean Herrera
     (https://github.com/adrianherrera/afl-ngram-pass/), activate by setting
-    AFL_LLVM_NGRAM_SIZE
+    AFL_LLVM_INSTRUMENT=NGRAM-<value> or AFL_LLVM_NGRAM_SIZE=<value>
+  - Added llvm_mode context sensitive branch coverage, activated by setting
+    AFL_LLVM_INSTRUMENT=CTX or AFL_LLVM_CTX=1
   - llvm_mode InsTrim mode:
     - removed workaround for bug where paths were not instrumented and
       imported fix by author
-    - made skipping 1 block functions an option and is disable by default,
+    - made skipping 1 block functions an option and is disabled by default,
       set AFL_LLVM_INSTRIM_SKIPSINGLEBLOCK=1 to re-enable this
   - qemu_mode:
     - qemu_mode now uses solely the internal capstone version to fix builds
@@ -53,6 +89,8 @@ sending a mail to <afl-users+subscribe@googlegroups.com>.
     - now supports hang mode `-H` to minimize hangs
     - fixed potential afl-tmin missbehavior for targets with multiple hangs
   - Pressing Control-c in afl-cmin did not terminate it for some OS
+  - the custom API was rewritten and is now the same for Python and shared
+    libraries.
 
 
 ### Version ++2.62c (release):
@@ -108,7 +146,7 @@ sending a mail to <afl-users+subscribe@googlegroups.com>.
      - AFL_PERSISTENT_HOOK callback module for persistent QEMU
        (see examples/qemu_persistent_hook)
      - added qemu_mode/README.persistent.md documentation
-     - AFL_ENTRYPOINT noew has instruction granularity
+     - AFL_ENTRYPOINT now has instruction granularity
   - afl-cmin is now a sh script (invoking awk) instead of bash for portability
     the original script is still present as afl-cmin.bash
   - afl-showmap: -i dir option now allows processing multiple inputs using the
@@ -285,7 +323,7 @@ sending a mail to <afl-users+subscribe@googlegroups.com>.
     you use the new -p option :-) - see docs/power_schedules.md
   - added afl-system-config script to set all system performance options for fuzzing
   - llvm_mode works with llvm 3.9 up to including 8 !
-  - qemu_mode got upgraded from 2.1 to 3.1 - incorporated from 
+  - qemu_mode got upgraded from 2.1 to 3.1 - incorporated from
     https://github.com/andreafioraldi/afl and with community patches added
 
 

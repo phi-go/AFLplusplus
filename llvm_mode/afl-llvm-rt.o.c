@@ -50,15 +50,15 @@
 
 #include <ucontext.h>
 
+#ifdef __linux__
+#include "snapshot-inl.h"
+#endif
+
 /* This is a somewhat ugly hack for the experimental 'trace-pc-guard' mode.
    Basically, we need to make sure that the forkserver is initialized after
    the LLVM-generated runtime initialization pass, not before. */
 
-#ifdef USE_TRACE_PC
 #define CONST_PRIO 5
-#else
-#define CONST_PRIO 0
-#endif                                                     /* ^USE_TRACE_PC */
 
 #include <sys/mman.h>
 #include <fcntl.h>
@@ -69,17 +69,23 @@
 
 u8  __afl_area_initial[MAP_SIZE];
 u8 *__afl_area_ptr = __afl_area_initial;
+u8 *__afl_dictionary;
 
 #ifdef __ANDROID__
-PREV_LOC_T __afl_prev_loc[MAX_NGRAM_SIZE];
+PREV_LOC_T __afl_prev_loc[NGRAM_SIZE_MAX];
 u32        __afl_final_loc;
+u32        __afl_prev_ctx;
+u32        __afl_cmp_counter;
+u32        __afl_dictionary_len;
 #else
-__thread PREV_LOC_T __afl_prev_loc[MAX_NGRAM_SIZE];
+__thread PREV_LOC_T __afl_prev_loc[NGRAM_SIZE_MAX];
 __thread u32        __afl_final_loc;
+__thread u32        __afl_prev_ctx;
+__thread u32        __afl_cmp_counter;
+__thread u32        __afl_dictionary_len;
 #endif
 
 struct cmp_map *__afl_cmp_map;
-__thread u32    __afl_cmp_counter;
 
 /* Running in persistent mode? */
 
@@ -101,6 +107,10 @@ static void __afl_map_shm(void) {
     const char *   shm_file_path = id_str;
     int            shm_fd = -1;
     unsigned char *shm_base = NULL;
+    unsigned int   map_size = MAP_SIZE
+
+        if (__afl_final_loc > 1 && __afl_final_loc < MAP_SIZE) map_size =
+            __afl_final_loc;
 
     /* create the shared memory segment as if it was a file */
     shm_fd = shm_open(shm_file_path, O_RDWR, 0600);
@@ -112,7 +122,7 @@ static void __afl_map_shm(void) {
     }
 
     /* map the shared memory segment to the address space of the process */
-    shm_base = mmap(0, MAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    shm_base = mmap(0, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if (shm_base == MAP_FAILED) {
 
       close(shm_fd);
@@ -185,6 +195,163 @@ static void __afl_map_shm(void) {
 
 }
 
+#ifdef __linux__
+static void __afl_start_snapshots(void) {
+
+  static u8 tmp[4] = {0, 0, 0, 0};
+  s32       child_pid;
+  u32       status = 0;
+  u32       map_size = MAP_SIZE;
+  u32       already_read_first = 0;
+  u32       was_killed;
+
+  if (__afl_final_loc > 1 && __afl_final_loc < MAP_SIZE)
+    map_size = __afl_final_loc;
+
+  u8 child_stopped = 0;
+
+  void (*old_sigchld_handler)(int) = 0;  // = signal(SIGCHLD, SIG_DFL);
+
+  /* Phone home and tell the parent that we're OK. If parent isn't there,
+     assume we're not running in forkserver mode and just execute program. */
+
+  status |= (FS_OPT_ENABLED | FS_OPT_SNAPSHOT);
+  if (map_size <= 0x800000)
+    status |= (FS_OPT_SET_MAPSIZE(map_size) | FS_OPT_MAPSIZE);
+  if (__afl_dictionary_len > 0 && __afl_dictionary) status |= FS_OPT_AUTODICT;
+  memcpy(tmp, &status, 4);
+
+  if (write(FORKSRV_FD + 1, tmp, 4) != 4) return;
+
+  if (__afl_dictionary_len > 0 && __afl_dictionary) {
+
+    if (read(FORKSRV_FD, &was_killed, 4) != 4) _exit(1);
+
+    if ((was_killed & (FS_OPT_ENABLED | FS_OPT_AUTODICT)) ==
+        (FS_OPT_ENABLED | FS_OPT_AUTODICT)) {
+
+      // great lets pass the dictionary through the forkserver FD
+      u32 len = __afl_dictionary_len, offset = 0;
+      s32 ret;
+
+      if (write(FORKSRV_FD + 1, &len, 4) != 4) {
+
+        write(2, "Error: could not send dictionary len\n",
+              strlen("Error: could not send dictionary len\n"));
+        _exit(1);
+
+      }
+
+      while (len != 0) {
+
+        ret = write(FORKSRV_FD + 1, __afl_dictionary + offset, len);
+
+        if (ret < 1) {
+
+          write(2, "Error: could not send dictionary\n",
+                strlen("Error: could not send dictionary\n"));
+          _exit(1);
+
+        }
+
+        len -= ret;
+        offset += ret;
+
+      }
+
+    } else {
+
+      // uh this forkserver master does not understand extended option passing
+      // or does not want the dictionary
+      already_read_first = 1;
+
+    }
+
+  }
+
+  while (1) {
+
+    int status;
+
+    if (already_read_first) {
+
+      already_read_first = 0;
+
+    } else {
+
+      /* Wait for parent by reading from the pipe. Abort if read fails. */
+      if (read(FORKSRV_FD, &was_killed, 4) != 4) _exit(1);
+
+    }
+
+    /* If we stopped the child in persistent mode, but there was a race
+       condition and afl-fuzz already issued SIGKILL, write off the old
+       process. */
+
+    if (child_stopped && was_killed) {
+
+      child_stopped = 0;
+      if (waitpid(child_pid, &status, 0) < 0) _exit(1);
+
+    }
+
+    if (!child_stopped) {
+
+      /* Once woken up, create a clone of our process. */
+
+      child_pid = fork();
+      if (child_pid < 0) _exit(1);
+
+      /* In child process: close fds, resume execution. */
+
+      if (!child_pid) {
+
+        signal(SIGCHLD, old_sigchld_handler);
+
+        close(FORKSRV_FD);
+        close(FORKSRV_FD + 1);
+
+        if (!afl_snapshot_do()) { raise(SIGSTOP); }
+
+        __afl_area_ptr[0] = 1;
+        memset(__afl_prev_loc, 0, NGRAM_SIZE_MAX * sizeof(PREV_LOC_T));
+
+        return;
+
+      }
+
+    } else {
+
+      /* Special handling for persistent mode: if the child is alive but
+         currently stopped, simply restart it with SIGCONT. */
+
+      kill(child_pid, SIGCONT);
+      child_stopped = 0;
+
+    }
+
+    /* In parent process: write PID to pipe, then wait for child. */
+
+    if (write(FORKSRV_FD + 1, &child_pid, 4) != 4) _exit(1);
+
+    if (waitpid(child_pid, &status, WUNTRACED) < 0) _exit(1);
+
+    /* In persistent mode, the child stops itself with SIGSTOP to indicate
+       a successful run. In this case, we want to wake it up without forking
+       again. */
+
+    if (WIFSTOPPED(status)) child_stopped = 1;
+
+    /* Relay wait status to pipe, then loop back. */
+
+    if (write(FORKSRV_FD + 1, &status, 4) != 4) _exit(1);
+
+  }
+
+}
+
+#endif
+
 #define read_from_command_pipe(V) \
     if ((read(FORKSRV_FD + 2, &V, sizeof(V)) != sizeof(V))) { \
       fprintf(stderr, "command read failed %s:%d\n", __FILE__, __LINE__); \
@@ -246,12 +413,37 @@ static void __afl_handle_deann_req(void) {
 /* Fork server logic. */
 
 static void __afl_start_forkserver(void) {
-  static u8 tmp[4];
-  s32       child_pid;
+
+#ifdef __linux__
+  if (!is_persistent && !__afl_cmp_map && !getenv("AFL_NO_SNAPSHOT") &&
+      afl_snapshot_init() >= 0) {
+
+    __afl_start_snapshots();
+    return;
+
+  }
+
+#endif
+
+  u8  tmp[4] = {0, 0, 0, 0};
+  s32 child_pid;
+  u32 status = 0;
+  u32 map_size = MAP_SIZE;
+  u32 already_read_first = 0;
+  u32 was_killed;
+
+  if (__afl_final_loc > 1 && __afl_final_loc < MAP_SIZE)
+    map_size = __afl_final_loc;
 
   u8 child_stopped = 0;
 
   void (*old_sigchld_handler)(int) = 0;  // = signal(SIGCHLD, SIG_DFL);
+
+  if (map_size <= 0x800000)
+    status |= (FS_OPT_SET_MAPSIZE(map_size) | FS_OPT_MAPSIZE);
+  if (__afl_dictionary_len > 0 && __afl_dictionary) status |= FS_OPT_AUTODICT;
+  if (status) status |= (FS_OPT_ENABLED);
+  memcpy(tmp, &status, 4);
 
   /* Phone home and tell the parent that we're OK. If parent isn't there,
      assume we're not running in forkserver mode and just execute program. */
@@ -261,6 +453,52 @@ static void __afl_start_forkserver(void) {
   action.sa_sigaction = &sigtrap_handler;
   action.sa_flags = SA_SIGINFO;
   sigaction(SIGTRAP, &action, NULL);
+
+  if (__afl_dictionary_len > 0 && __afl_dictionary) {
+
+    if (read(FORKSRV_FD, &was_killed, 4) != 4) _exit(1);
+
+    if ((was_killed & (FS_OPT_ENABLED | FS_OPT_AUTODICT)) ==
+        (FS_OPT_ENABLED | FS_OPT_AUTODICT)) {
+
+      // great lets pass the dictionary through the forkserver FD
+      u32 len = __afl_dictionary_len, offset = 0;
+      s32 ret;
+
+      if (write(FORKSRV_FD + 1, &len, 4) != 4) {
+
+        write(2, "Error: could not send dictionary len\n",
+              strlen("Error: could not send dictionary len\n"));
+        _exit(1);
+
+      }
+
+      while (len != 0) {
+
+        ret = write(FORKSRV_FD + 1, __afl_dictionary + offset, len);
+
+        if (ret < 1) {
+
+          write(2, "Error: could not send dictionary\n",
+                strlen("Error: could not send dictionary\n"));
+          _exit(1);
+
+        }
+
+        len -= ret;
+        offset += ret;
+
+      }
+
+    } else {
+
+      // uh this forkserver master does not understand extended option passing
+      // or does not want the dictionary
+      already_read_first = 1;
+
+    }
+
+  }
 
   while (1) {
 
@@ -296,7 +534,15 @@ static void __afl_start_forkserver(void) {
       continue;
     }
 
-    if (read(FORKSRV_FD, &was_killed, 4) != 4) _exit(1);
+    if (already_read_first) {
+
+      already_read_first = 0;
+
+    } else {
+
+      if (read(FORKSRV_FD, &was_killed, 4) != 4) _exit(1);
+
+    }
 
     /* If we stopped the child in persistent mode, but there was a race
        condition and afl-fuzz already issued SIGKILL, write off the old
@@ -366,8 +612,12 @@ static void __afl_start_forkserver(void) {
 
 int __afl_persistent_loop(unsigned int max_cnt) {
 
-  static u8  first_pass = 1;
-  static u32 cycle_cnt;
+  static u8    first_pass = 1;
+  static u32   cycle_cnt;
+  unsigned int map_size = MAP_SIZE;
+
+  if (__afl_final_loc > 1 && __afl_final_loc < MAP_SIZE)
+    map_size = __afl_final_loc;
 
   if (first_pass) {
 
@@ -378,9 +628,9 @@ int __afl_persistent_loop(unsigned int max_cnt) {
 
     if (is_persistent) {
 
-      memset(__afl_area_ptr, 0, MAP_SIZE);
+      memset(__afl_area_ptr, 0, map_size);
       __afl_area_ptr[0] = 1;
-      memset(__afl_prev_loc, 0, MAX_NGRAM_SIZE * sizeof(PREV_LOC_T));
+      memset(__afl_prev_loc, 0, NGRAM_SIZE_MAX * sizeof(PREV_LOC_T));
 
     }
 
@@ -397,7 +647,7 @@ int __afl_persistent_loop(unsigned int max_cnt) {
       raise(SIGSTOP);
 
       __afl_area_ptr[0] = 1;
-      memset(__afl_prev_loc, 0, MAX_NGRAM_SIZE * sizeof(PREV_LOC_T));
+      memset(__afl_prev_loc, 0, NGRAM_SIZE_MAX * sizeof(PREV_LOC_T));
 
       return 1;
 
@@ -499,13 +749,7 @@ void __sanitizer_cov_trace_pc_guard_init(uint32_t *start, uint32_t *stop) {
 
 ///// CmpLog instrumentation
 
-void __cmplog_ins_hook1(uint8_t Arg1, uint8_t Arg2) {
-
-  return;
-
-}
-
-void __cmplog_ins_hook2(uint16_t Arg1, uint16_t Arg2) {
+void __cmplog_ins_hook1(uint8_t arg1, uint8_t arg2) {
 
   if (!__afl_cmp_map) return;
 
@@ -520,16 +764,36 @@ void __cmplog_ins_hook2(uint16_t Arg1, uint16_t Arg2) {
   // if (!__afl_cmp_map->headers[k].cnt)
   //  __afl_cmp_map->headers[k].cnt = __afl_cmp_counter++;
 
-  __afl_cmp_map->headers[k].shape = 1;
-  //__afl_cmp_map->headers[k].type = CMP_TYPE_INS;
+  __afl_cmp_map->headers[k].shape = 0;
 
   hits &= CMP_MAP_H - 1;
-  __afl_cmp_map->log[k][hits].v0 = Arg1;
-  __afl_cmp_map->log[k][hits].v1 = Arg2;
+  __afl_cmp_map->log[k][hits].v0 = arg1;
+  __afl_cmp_map->log[k][hits].v1 = arg2;
 
 }
 
-void __cmplog_ins_hook4(uint32_t Arg1, uint32_t Arg2) {
+void __cmplog_ins_hook2(uint16_t arg1, uint16_t arg2) {
+
+  if (!__afl_cmp_map) return;
+
+  uintptr_t k = (uintptr_t)__builtin_return_address(0);
+  k = (k >> 4) ^ (k << 8);
+  k &= CMP_MAP_W - 1;
+
+  __afl_cmp_map->headers[k].type = CMP_TYPE_INS;
+
+  u32 hits = __afl_cmp_map->headers[k].hits;
+  __afl_cmp_map->headers[k].hits = hits + 1;
+
+  __afl_cmp_map->headers[k].shape = 1;
+
+  hits &= CMP_MAP_H - 1;
+  __afl_cmp_map->log[k][hits].v0 = arg1;
+  __afl_cmp_map->log[k][hits].v1 = arg2;
+
+}
+
+void __cmplog_ins_hook4(uint32_t arg1, uint32_t arg2) {
 
   if (!__afl_cmp_map) return;
 
@@ -545,12 +809,12 @@ void __cmplog_ins_hook4(uint32_t Arg1, uint32_t Arg2) {
   __afl_cmp_map->headers[k].shape = 3;
 
   hits &= CMP_MAP_H - 1;
-  __afl_cmp_map->log[k][hits].v0 = Arg1;
-  __afl_cmp_map->log[k][hits].v1 = Arg2;
+  __afl_cmp_map->log[k][hits].v0 = arg1;
+  __afl_cmp_map->log[k][hits].v1 = arg2;
 
 }
 
-void __cmplog_ins_hook8(uint64_t Arg1, uint64_t Arg2) {
+void __cmplog_ins_hook8(uint64_t arg1, uint64_t arg2) {
 
   if (!__afl_cmp_map) return;
 
@@ -566,8 +830,8 @@ void __cmplog_ins_hook8(uint64_t Arg1, uint64_t Arg2) {
   __afl_cmp_map->headers[k].shape = 7;
 
   hits &= CMP_MAP_H - 1;
-  __afl_cmp_map->log[k][hits].v0 = Arg1;
-  __afl_cmp_map->log[k][hits].v1 = Arg2;
+  __afl_cmp_map->log[k][hits].v0 = arg1;
+  __afl_cmp_map->log[k][hits].v1 = arg2;
 
 }
 
@@ -582,28 +846,28 @@ void __cmplog_ins_hook8(uint64_t Arg1, uint64_t Arg2) {
 #pragma weak __sanitizer_cov_trace_cmp4 = __cmplog_ins_hook4
 #pragma weak __sanitizer_cov_trace_cmp8 = __cmplog_ins_hook8
 #else
-void __sanitizer_cov_trace_const_cmp1(uint8_t Arg1, uint8_t Arg2)
+void __sanitizer_cov_trace_const_cmp1(uint8_t arg1, uint8_t arg2)
     __attribute__((alias("__cmplog_ins_hook1")));
-void __sanitizer_cov_trace_const_cmp2(uint16_t Arg1, uint16_t Arg2)
+void __sanitizer_cov_trace_const_cmp2(uint16_t arg1, uint16_t arg2)
     __attribute__((alias("__cmplog_ins_hook2")));
-void __sanitizer_cov_trace_const_cmp4(uint32_t Arg1, uint32_t Arg2)
+void __sanitizer_cov_trace_const_cmp4(uint32_t arg1, uint32_t arg2)
     __attribute__((alias("__cmplog_ins_hook4")));
-void __sanitizer_cov_trace_const_cmp8(uint64_t Arg1, uint64_t Arg2)
+void __sanitizer_cov_trace_const_cmp8(uint64_t arg1, uint64_t arg2)
     __attribute__((alias("__cmplog_ins_hook8")));
 
-void __sanitizer_cov_trace_cmp1(uint8_t Arg1, uint8_t Arg2)
+void __sanitizer_cov_trace_cmp1(uint8_t arg1, uint8_t arg2)
     __attribute__((alias("__cmplog_ins_hook1")));
-void __sanitizer_cov_trace_cmp2(uint16_t Arg1, uint16_t Arg2)
+void __sanitizer_cov_trace_cmp2(uint16_t arg1, uint16_t arg2)
     __attribute__((alias("__cmplog_ins_hook2")));
-void __sanitizer_cov_trace_cmp4(uint32_t Arg1, uint32_t Arg2)
+void __sanitizer_cov_trace_cmp4(uint32_t arg1, uint32_t arg2)
     __attribute__((alias("__cmplog_ins_hook4")));
-void __sanitizer_cov_trace_cmp8(uint64_t Arg1, uint64_t Arg2)
+void __sanitizer_cov_trace_cmp8(uint64_t arg1, uint64_t arg2)
     __attribute__((alias("__cmplog_ins_hook8")));
 #endif                                                /* defined(__APPLE__) */
 
-void __sanitizer_cov_trace_switch(uint64_t Val, uint64_t *Cases) {
+void __sanitizer_cov_trace_switch(uint64_t val, uint64_t *cases) {
 
-  for (uint64_t i = 0; i < Cases[0]; i++) {
+  for (uint64_t i = 0; i < cases[0]; i++) {
 
     uintptr_t k = (uintptr_t)__builtin_return_address(0) + i;
     k = (k >> 4) ^ (k << 8);
@@ -617,8 +881,8 @@ void __sanitizer_cov_trace_switch(uint64_t Val, uint64_t *Cases) {
     __afl_cmp_map->headers[k].shape = 7;
 
     hits &= CMP_MAP_H - 1;
-    __afl_cmp_map->log[k][hits].v0 = Val;
-    __afl_cmp_map->log[k][hits].v1 = Cases[i + 2];
+    __afl_cmp_map->log[k][hits].v0 = val;
+    __afl_cmp_map->log[k][hits].v1 = cases[i + 2];
 
   }
 

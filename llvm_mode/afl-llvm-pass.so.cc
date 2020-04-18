@@ -125,6 +125,9 @@ class AFLCoverage : public ModulePass {
  protected:
   std::list<std::string> myWhitelist;
   uint32_t               ngram_size = 0;
+  uint32_t               debug = 0;
+  uint32_t               map_size = MAP_SIZE;
+  char *                 ctx_str = NULL;
 
 };
 
@@ -180,6 +183,8 @@ bool AFLCoverage::runOnModule(Module &M) {
 
   char be_quiet = 0;
 
+  if (getenv("AFL_DEBUG")) debug = 1;
+
   if ((isatty(2) && !getenv("AFL_QUIET")) || getenv("AFL_DEBUG") != NULL) {
 
     SAYF(cCYA "afl-llvm-pass" VERSION cRST
@@ -188,6 +193,19 @@ bool AFLCoverage::runOnModule(Module &M) {
   } else
 
     be_quiet = 1;
+
+  /*
+    char *ptr;
+    if ((ptr = getenv("AFL_MAP_SIZE")) || (ptr = getenv("AFL_MAPSIZE"))) {
+
+      map_size = atoi(ptr);
+      if (map_size < 8 || map_size > (1 << 29))
+        FATAL("illegal AFL_MAP_SIZE %u, must be between 2^3 and 2^30",
+    map_size); if (map_size % 8) map_size = (((map_size >> 3) + 1) << 3);
+
+    }
+
+  */
 
   /* Decide instrumentation ratio */
 
@@ -210,6 +228,7 @@ bool AFLCoverage::runOnModule(Module &M) {
 
   char *ngram_size_str = getenv("AFL_LLVM_NGRAM_SIZE");
   if (!ngram_size_str) ngram_size_str = getenv("AFL_NGRAM_SIZE");
+  ctx_str = getenv("AFL_LLVM_CTX");
 
 #ifdef AFL_HAVE_VECTOR_INTRINSICS
   /* Decide previous location vector size (must be a power of two) */
@@ -217,11 +236,11 @@ bool AFLCoverage::runOnModule(Module &M) {
 
   if (ngram_size_str)
     if (sscanf(ngram_size_str, "%u", &ngram_size) != 1 || ngram_size < 2 ||
-        ngram_size > MAX_NGRAM_SIZE)
+        ngram_size > NGRAM_SIZE_MAX)
       FATAL(
-          "Bad value of AFL_NGRAM_SIZE (must be between 2 and MAX_NGRAM_SIZE "
+          "Bad value of AFL_NGRAM_SIZE (must be between 2 and NGRAM_SIZE_MAX "
           "(%u))",
-          MAX_NGRAM_SIZE);
+          NGRAM_SIZE_MAX);
 
   if (ngram_size == 1) ngram_size = 0;
   if (ngram_size)
@@ -229,9 +248,8 @@ bool AFLCoverage::runOnModule(Module &M) {
   else
 #else
   if (ngram_size_str)
-    FATAL(
-        "Sorry, n-gram branch coverage is not supported with llvm version %s!",
-        LLVM_VERSION_STRING);
+    FATAL("Sorry, NGRAM branch coverage is not supported with llvm version %s!",
+          LLVM_VERSION_STRING);
 #endif
     PrevLocSize = 1;
 
@@ -240,6 +258,9 @@ bool AFLCoverage::runOnModule(Module &M) {
   if (ngram_size) PrevLocTy = VectorType::get(IntLocTy, PrevLocVecSize);
 #endif
 
+  if (ctx_str && ngram_size_str)
+    FATAL("you must decide between NGRAM and CTX instrumentation");
+
   /* Get globals for the SHM region and the previous location. Note that
      __afl_prev_loc is thread-local. */
 
@@ -247,6 +268,17 @@ bool AFLCoverage::runOnModule(Module &M) {
       new GlobalVariable(M, PointerType::get(Int8Ty, 0), false,
                          GlobalValue::ExternalLinkage, 0, "__afl_area_ptr");
   GlobalVariable *AFLPrevLoc;
+  GlobalVariable *AFLContext;
+
+  if (ctx_str)
+#ifdef __ANDROID__
+    AFLContext = new GlobalVariable(
+        M, Int32Ty, false, GlobalValue::ExternalLinkage, 0, "__afl_prev_ctx");
+#else
+    AFLContext = new GlobalVariable(
+        M, Int32Ty, false, GlobalValue::ExternalLinkage, 0, "__afl_prev_ctx", 0,
+        GlobalVariable::GeneralDynamicTLSModel, 0, false);
+#endif
 
 #ifdef AFL_HAVE_VECTOR_INTRINSICS
   if (ngram_size)
@@ -292,6 +324,8 @@ bool AFLCoverage::runOnModule(Module &M) {
   ConstantInt *Zero = ConstantInt::get(Int8Ty, 0);
   ConstantInt *One = ConstantInt::get(Int8Ty, 1);
 
+  LoadInst *PrevCtx;  // CTX sensitive coverage
+
   /* Instrument all the things! */
 
   int inst_blocks = 0;
@@ -302,7 +336,62 @@ bool AFLCoverage::runOnModule(Module &M) {
 
   for (auto &F : M) {
 
+    int has_calls = 0;
+    if (debug)
+      fprintf(stderr, "FUNCTION: %s (%zu)\n", F.getName().str().c_str(),
+              F.size());
+
     if (isBlacklisted(&F)) continue;
+
+    // AllocaInst *CallingContext = nullptr;
+
+    if (ctx_str && F.size() > 1) {  // Context sensitive coverage
+      // load the context ID of the previous function and write to to a local
+      // variable on the stack
+      auto                 bb = &F.getEntryBlock();
+      BasicBlock::iterator IP = bb->getFirstInsertionPt();
+      IRBuilder<>          IRB(&(*IP));
+      PrevCtx = IRB.CreateLoad(AFLContext);
+      PrevCtx->setMetadata(M.getMDKindID("nosanitize"), MDNode::get(C, None));
+
+      // does the function have calls? and is any of the calls larger than one
+      // basic block?
+      has_calls = 0;
+      for (auto &BB : F) {
+
+        if (has_calls) break;
+        for (auto &IN : BB) {
+
+          CallInst *callInst = nullptr;
+          if ((callInst = dyn_cast<CallInst>(&IN))) {
+
+            Function *Callee = callInst->getCalledFunction();
+            if (!Callee || Callee->size() < 2)
+              continue;
+            else {
+
+              has_calls = 1;
+              break;
+
+            }
+
+          }
+
+        }
+
+      }
+
+      // if yes we store a context ID for this function in the global var
+      if (has_calls) {
+
+        ConstantInt *NewCtx = ConstantInt::get(Int32Ty, AFL_R(map_size));
+        StoreInst *  StoreCtx = IRB.CreateStore(NewCtx, AFLContext);
+        StoreCtx->setMetadata(M.getMDKindID("nosanitize"),
+                              MDNode::get(C, None));
+
+      }
+
+    }
 
     for (auto &BB : F) {
 
@@ -420,12 +509,28 @@ bool AFLCoverage::runOnModule(Module &M) {
 
       }
 
+      // in CTX mode we have to restore the original context for the caller -
+      // she might be calling other functions which need the correct CTX
+      if (ctx_str && has_calls) {
+
+        Instruction *Inst = BB.getTerminator();
+        if (isa<ReturnInst>(Inst) || isa<ResumeInst>(Inst)) {
+
+          IRBuilder<> Post_IRB(Inst);
+          StoreInst * RestoreCtx = Post_IRB.CreateStore(PrevCtx, AFLContext);
+          RestoreCtx->setMetadata(M.getMDKindID("nosanitize"),
+                                  MDNode::get(C, None));
+
+        }
+
+      }
+
       if (AFL_R(100) >= inst_ratio) continue;
 
       /* Make up cur_loc */
 
       // cur_loc++;
-      cur_loc = AFL_R(MAP_SIZE);
+      cur_loc = AFL_R(map_size);
 
 /* There is a problem with Ubuntu 18.04 and llvm 6.0 (see issue #63).
    The inline function successors() is not inlined and also not found at runtime
@@ -491,6 +596,9 @@ bool AFLCoverage::runOnModule(Module &M) {
         PrevLocTrans = IRB.CreateXorReduce(PrevLoc);
       else
 #endif
+          if (ctx_str)
+        PrevLocTrans = IRB.CreateZExt(IRB.CreateXor(PrevLoc, PrevCtx), Int32Ty);
+      else
         PrevLocTrans = IRB.CreateZExt(PrevLoc, IRB.getInt32Ty());
 
       /* Load SHM pointer */
@@ -617,6 +725,56 @@ bool AFLCoverage::runOnModule(Module &M) {
     }
 
   }
+
+  /*
+    // This is currently disabled because we not only need to create/insert a
+    // function (easy), but also add it as a constructor with an ID < 5
+
+    if (getenv("AFL_LLVM_DONTWRITEID") == NULL) {
+
+      // yes we could create our own function, insert it into ctors ...
+      // but this would be a pain in the butt ... so we use afl-llvm-rt.o
+
+      Function *f = ...
+
+      if (!f) {
+
+        fprintf(stderr,
+                "Error: init function could not be created (this should not
+    happen)\n"); exit(-1);
+
+      }
+
+      ... constructor for f = 4
+
+      BasicBlock *bb = &f->getEntryBlock();
+      if (!bb) {
+
+        fprintf(stderr,
+                "Error: init function does not have an EntryBlock (this should
+    not happen)\n"); exit(-1);
+
+      }
+
+      BasicBlock::iterator IP = bb->getFirstInsertionPt();
+      IRBuilder<>          IRB(&(*IP));
+
+      if (map_size <= 0x800000) {
+
+        GlobalVariable *AFLFinalLoc = new GlobalVariable(
+            M, Int32Ty, true, GlobalValue::ExternalLinkage, 0,
+            "__afl_final_loc", 0, GlobalVariable::GeneralDynamicTLSModel, 0,
+            false);
+        ConstantInt *const_loc = ConstantInt::get(Int32Ty, map_size);
+        StoreInst *  StoreFinalLoc = IRB.CreateStore(const_loc, AFLFinalLoc);
+        StoreFinalLoc->setMetadata(M.getMDKindID("nosanitize"),
+                                     MDNode::get(C, None));
+
+      }
+
+    }
+
+  */
 
   /* Say something nice. */
 

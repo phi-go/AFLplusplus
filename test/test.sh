@@ -185,7 +185,7 @@ test "$SYS" = "i686" -o "$SYS" = "x86_64" -o "$SYS" = "amd64" -o "$SYS" = "i86pc
     esac
     rm -f in2/in*
     export AFL_QUIET=1
-    if type bash >/dev/null ; then {
+    if command -v bash >/dev/null ; then {
       AFL_PATH=`pwd`/.. ../afl-cmin.bash -m ${MEM_LIMIT} -i in -o in2 -- ./test-instr.plain >/dev/null
       CNT=`ls in2/* 2>/dev/null | wc -l`
       case "$CNT" in
@@ -353,7 +353,7 @@ test -e ../afl-clang-fast -a -e ../split-switches-pass.so && {
   }
   AFL_DEBUG=1 AFL_LLVM_LAF_SPLIT_SWITCHES=1 AFL_LLVM_LAF_TRANSFORM_COMPARES=1 AFL_LLVM_LAF_SPLIT_COMPARES=1 ../afl-clang-fast -o test-compcov.compcov test-compcov.c > test.out 2>&1
   test -e test-compcov.compcov && {
-    grep -Eq " [3-9][0-9] location" test.out && {
+    grep -Eq " [ 12][0-9][0-9] location| [3-9][0-9] location" test.out && {
       $ECHO "$GREEN[+] llvm_mode laf-intel/compcov feature works correctly"
     } || {
       $ECHO "$RED[!] llvm_mode laf-intel/compcov feature failed"
@@ -471,8 +471,9 @@ test -e ../afl-clang-lto -a -e ../afl-llvm-lto-instrumentation.so && {
 }
 
 $ECHO "$BLUE[*] Testing: gcc_plugin"
-export AFL_CC=`command -v gcc`
 test -e ../afl-gcc-fast -a -e ../afl-gcc-rt.o && {
+  SAVE_AFL_CC=${AFL_CC}
+  export AFL_CC=`command -v gcc`
   ../afl-gcc-fast -o test-instr.plain.gccpi ../test-instr.c > /dev/null 2>&1
   AFL_HARDEN=1 ../afl-gcc-fast -o test-compcov.harden.gccpi test-compcov.c > /dev/null 2>&1
   test -e test-instr.plain.gccpi && {
@@ -574,10 +575,13 @@ test -e ../afl-gcc-fast -a -e ../afl-gcc-rt.o && {
     CODE=1
   }
   rm -f test-persistent
+  export AFL_CC=${SAVE_AFL_CC}
 } || {
   $ECHO "$YELLOW[-] gcc_plugin not compiled, cannot test"
   INCOMPLETE=1
 }
+
+test -z "$AFL_CC" && unset AFL_CC
 
 $ECHO "$BLUE[*] Testing: shared library extensions"
 cc $CFLAGS -o test-compcov test-compcov.c > /dev/null 2>&1
@@ -614,7 +618,6 @@ test -e ../libdislocator.so && {
 rm -f test-compcov
 test -e ../libradamsa.so && {
   # on FreeBSD need to set AFL_CC
-
   test `uname -s` = 'FreeBSD' && {
     if type clang >/dev/null; then
       export AFL_CC=`command -v clang`
@@ -651,6 +654,16 @@ test -e ../libradamsa.so && {
   INCOMPLETE=1
 }
 
+test -z "$AFL_CC" && {
+  if type gcc >/dev/null; then
+    export AFL_CC=gcc
+  else
+    if type clang >/dev/null; then
+      export AFL_CC=clang
+    fi
+  fi
+}
+
 $ECHO "$BLUE[*] Testing: qemu_mode"
 test -e ../afl-qemu-trace && {
   gcc -pie -fPIE -o test-instr ../test-instr.c
@@ -658,7 +671,7 @@ test -e ../afl-qemu-trace && {
   test -e test-instr -a -e test-compcov && {
     {
       mkdir -p in
-      echo 0 > in/in
+      echo 00000 > in/in
       $ECHO "$GREY[*] running afl-fuzz for qemu_mode, this will take approx 10 seconds"
       {
         ../afl-fuzz -m ${MEM_LIMIT} -V10 -Q -i in -o out -- ./test-instr >>errors 2>&1
@@ -722,6 +735,25 @@ test -e ../afl-qemu-trace && {
         rm -f errors
       } || {
        $ECHO "$YELLOW[-] not an intel or arm platform, cannot test qemu_mode compcov"
+      }
+      
+      test "$SYS" = "i686" -o "$SYS" = "x86_64" -o "$SYS" = "amd64" -o "$SYS" = "i86pc" -o "$SYS" = "aarch64" -o ! "${SYS%%arm*}" && {
+        $ECHO "$GREY[*] running afl-fuzz for qemu_mode cmplog, this will take approx 10 seconds"
+        {
+          ../afl-fuzz -m none -V10 -Q -c 0 -i in -o out -- ./test-compcov >>errors 2>&1
+        } >>errors 2>&1
+        test -n "$( ls out/queue/id:000001* 2>/dev/null )" && {
+          $ECHO "$GREEN[+] afl-fuzz is working correctly with qemu_mode cmplog"
+        } || {
+          echo CUT------------------------------------------------------------------CUT
+          cat errors
+          echo CUT------------------------------------------------------------------CUT
+          $ECHO "$RED[!] afl-fuzz is not working correctly with qemu_mode cmplog"
+          CODE=1
+        }
+        rm -f errors
+      } || {
+       $ECHO "$YELLOW[-] not an intel or arm platform, cannot test qemu_mode cmplog"
       }
 
       test "$SYS" = "i686" -o "$SYS" = "x86_64" -o "$SYS" = "amd64" -o "$SYS" = "i86pc" -o "$SYS" = "aarch64" -o ! "${SYS%%arm*}" && {
@@ -894,82 +926,87 @@ test -d ../unicorn_mode/unicornafl && {
 }
 
 $ECHO "$BLUE[*] Testing: custom mutator"
-unset AFL_CC  # Test case "gcc_plugin" sets AFL_CC to "gcc". We reset it to use the default compiler
-test `uname -s` = 'Darwin' && {
-  CUSTOM_MUTATOR_PATH=$( realpath ../examples/custom_mutators )
-} || {
-  CUSTOM_MUTATOR_PATH=$( readlink -f ../examples/custom_mutators )
-}
-test -e test-custom-mutator.c -a -e ${CUSTOM_MUTATOR_PATH}/example.c -a -e ${CUSTOM_MUTATOR_PATH}/example.py && {
-  # Compile the vulnerable program
-  ../afl-clang-fast -o test-custom-mutator test-custom-mutator.c > /dev/null 2>&1
-  # Compile the custom mutator
-  make -C ../examples/custom_mutators libexamplemutator.so > /dev/null 2>&1
-  test -e test-custom-mutator -a -e ${CUSTOM_MUTATOR_PATH}/libexamplemutator.so && {
-    # Create input directory
-    mkdir -p in
-    echo "00000" > in/in
-
-    # Run afl-fuzz w/ the C mutator
-    $ECHO "$GREY[*] running afl-fuzz for the C mutator, this will take approx 10 seconds"
-    {
-      AFL_CUSTOM_MUTATOR_LIBRARY=${CUSTOM_MUTATOR_PATH}/libexamplemutator.so ../afl-fuzz -V10 -m ${MEM_LIMIT} -i in -o out -- ./test-custom-mutator >>errors 2>&1
-    } >>errors 2>&1
-
-    # Check results
-    test -n "$( ls out/crashes/id:000000* 2>/dev/null )" && {  # TODO: update here
-      $ECHO "$GREEN[+] afl-fuzz is working correctly with the C mutator"
-    } || {
-      echo CUT------------------------------------------------------------------CUT
-      cat errors
-      echo CUT------------------------------------------------------------------CUT
-      $ECHO "$RED[!] afl-fuzz is not working correctly with the C mutator"
-      CODE=1
-    }
-
-    # Clean
-    rm -rf out errors
-
-    # Run afl-fuzz w/ the Python mutator
-    $ECHO "$GREY[*] running afl-fuzz for the Python mutator, this will take approx 10 seconds"
-    {
-      export PYTHONPATH=${CUSTOM_MUTATOR_PATH}
-      export AFL_PYTHON_MODULE=example
-      ../afl-fuzz -V10 -m ${MEM_LIMIT} -i in -o out -- ./test-custom-mutator >>errors 2>&1
-      unset PYTHONPATH
-      unset AFL_PYTHON_MODULE
-    } >>errors 2>&1
-
-    # Check results
-    test -n "$( ls out/crashes/id:000000* 2>/dev/null )" && {  # TODO: update here
-      $ECHO "$GREEN[+] afl-fuzz is working correctly with the Python mutator"
-    } || {
-      echo CUT------------------------------------------------------------------CUT
-      cat errors
-      echo CUT------------------------------------------------------------------CUT
-      $ECHO "$RED[!] afl-fuzz is not working correctly with the Python mutator"
-      CODE=1
-    }
-
-    # Clean
-    rm -rf in out errors
-    rm -rf ${CUSTOM_MUTATOR_PATH}/__pycache__/
+test "1" = "`../afl-fuzz | grep -i 'without python' >/dev/null; echo $?`" && {
+  test `uname -s` = 'Darwin' && {
+    CUSTOM_MUTATOR_PATH=$( realpath ../examples/custom_mutators )
   } || {
-    ls .
-    ls ${CUSTOM_MUTATOR_PATH}
-    $ECHO "$RED[!] cannot compile the test program or the custom mutator"
-    CODE=1
+    CUSTOM_MUTATOR_PATH=$( readlink -f ../examples/custom_mutators )
   }
+  test -e test-custom-mutator.c -a -e ${CUSTOM_MUTATOR_PATH}/example.c -a -e ${CUSTOM_MUTATOR_PATH}/example.py && {
+    unset AFL_CC
+    # Compile the vulnerable program
+    ../afl-clang-fast -o test-custom-mutator test-custom-mutator.c > /dev/null 2>&1
+    # Compile the custom mutator
+    make -C ../examples/custom_mutators libexamplemutator.so > /dev/null 2>&1
+    test -e test-custom-mutator -a -e ${CUSTOM_MUTATOR_PATH}/libexamplemutator.so && {
+      # Create input directory
+      mkdir -p in
+      echo "00000" > in/in
 
-  #test "$CODE" = 1 && { $ECHO "$YELLOW[!] custom mutator tests currently will not fail travis" ; CODE=0 ; }
+      # Run afl-fuzz w/ the C mutator
+      $ECHO "$GREY[*] running afl-fuzz for the C mutator, this will take approx 10 seconds"
+      {
+        AFL_CUSTOM_MUTATOR_LIBRARY=${CUSTOM_MUTATOR_PATH}/libexamplemutator.so ../afl-fuzz -V10 -m ${MEM_LIMIT} -i in -o out -- ./test-custom-mutator >>errors 2>&1
+      } >>errors 2>&1
 
-  make -C ../examples/custom_mutators clean > /dev/null 2>&1
-  rm -f test-custom-mutator
+      # Check results
+      test -n "$( ls out/crashes/id:000000* 2>/dev/null )" && {  # TODO: update here
+        $ECHO "$GREEN[+] afl-fuzz is working correctly with the C mutator"
+      } || {
+        echo CUT------------------------------------------------------------------CUT
+        cat errors
+        echo CUT------------------------------------------------------------------CUT
+        $ECHO "$RED[!] afl-fuzz is not working correctly with the C mutator"
+        CODE=1
+      }
+
+      # Clean
+      rm -rf out errors
+
+      # Run afl-fuzz w/ the Python mutator
+      $ECHO "$GREY[*] running afl-fuzz for the Python mutator, this will take approx 10 seconds"
+      {
+        export PYTHONPATH=${CUSTOM_MUTATOR_PATH}
+        export AFL_PYTHON_MODULE=example
+        ../afl-fuzz -V10 -m ${MEM_LIMIT} -i in -o out -- ./test-custom-mutator >>errors 2>&1
+        unset PYTHONPATH
+        unset AFL_PYTHON_MODULE
+      } >>errors 2>&1
+
+      # Check results
+      test -n "$( ls out/crashes/id:000000* 2>/dev/null )" && {  # TODO: update here
+        $ECHO "$GREEN[+] afl-fuzz is working correctly with the Python mutator"
+      } || {
+        echo CUT------------------------------------------------------------------CUT
+        cat errors
+        echo CUT------------------------------------------------------------------CUT
+        $ECHO "$RED[!] afl-fuzz is not working correctly with the Python mutator"
+        CODE=1
+      }
+
+      # Clean
+      rm -rf in out errors
+      rm -rf ${CUSTOM_MUTATOR_PATH}/__pycache__/
+    } || {
+      ls .
+      ls ${CUSTOM_MUTATOR_PATH}
+      $ECHO "$RED[!] cannot compile the test program or the custom mutator"
+      CODE=1
+    }
+
+    #test "$CODE" = 1 && { $ECHO "$YELLOW[!] custom mutator tests currently will not fail travis" ; CODE=0 ; }
+
+    make -C ../examples/custom_mutators clean > /dev/null 2>&1
+    rm -f test-custom-mutator
+  } || {
+    $ECHO "$YELLOW[-] no custom mutators in $CUSTOM_MUTATOR_PATH, cannot test"
+    INCOMPLETE=1
+  }
+  unset CUSTOM_MUTATOR_PATH
 } || {
-  $ECHO "$YELLOW[-] no custom mutators in $CUSTOM_MUTATOR_PATH, cannot test"
+  $ECHO "$YELLOW[-] no python support in afl-fuzz, cannot test"
   INCOMPLETE=1
 }
-unset CUSTOM_MUTATOR_PATH
 
 $ECHO "$BLUE[*] Execution cmocka Unit-Tests $GREY"
 unset AFL_CC
