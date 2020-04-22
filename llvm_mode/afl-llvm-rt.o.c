@@ -390,6 +390,8 @@ typedef struct action {
 
 typedef struct bb_annotation {
   void * pos;
+  int shm_id;
+  void * shm_addr;
   action_t * actions;
   UT_hash_handle hh;
 } bb_annotation_t;
@@ -510,6 +512,8 @@ void remove_bb_annotation(void * bb_annotation_id) {
   }
 
   // free bb annotation
+  shmdt(annotation->shm_addr);
+  annotation->shm_addr = NULL;
   HASH_DEL(bb_annotations_map, annotation);
   free(annotation);
 
@@ -523,6 +527,12 @@ static void __afl_handle_ann_req(void) {
   NULL_CHECK(bb_ann);
   bb_ann->actions = NULL;
   read_from_command_pipe(bb_ann->pos);
+  read_from_command_pipe(bb_ann->shm_id);
+  bb_ann->shm_addr = shmat(bb_ann->shm_id, NULL, 0);
+  if (bb_ann->shm_addr == (void *) -1) {
+    perror("could not get shm segment");
+    _exit(1);
+  }
   HASH_ADD_PTR(bb_annotations_map, pos, bb_ann);
 
   // get all actions for that bb_annotation

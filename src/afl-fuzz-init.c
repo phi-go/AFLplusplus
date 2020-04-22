@@ -2260,6 +2260,8 @@ typedef enum {END=1, START=2, STOP=3, NOP=4} annotation_action_t;
 
 typedef struct bb_annotation {
   void * pos;
+  int shm_id;
+  void * shm_addr;
 } bb_annotation_t;
 
 #define MAX_BB_SIZE 4096
@@ -2296,16 +2298,31 @@ static void __zmq_bb_req(afl_state_t * afl) {
   } while(0);
 
 static void __zmq_annotation_req(afl_state_t * afl) {
-  bb_annotation_t * bb_ann = calloc(1, sizeof(bb_annotation_t));
+      {
+        struct shm_info info;
+        shmctl(0, SHM_INFO, (void*) &info);
+        fprintf(stderr, "p: %d, num seg: %d\n", getpid(), info.used_ids);
+      }
+  bb_annotation_t * bb_ann = calloc(1, sizeof(*bb_ann));
   if (bb_ann == NULL) {
     FATAL("failed to allocated bb_annotation %s:%d", __FILE__, __LINE__);
   }
   z_read(&bb_ann->pos);
+  bb_ann->shm_id = shmget(IPC_PRIVATE, sysconf(_SC_PAGESIZE), IPC_CREAT | IPC_EXCL | 0600);
+  if (bb_ann->shm_id == -1) {
+    PFATAL("failed to get shm for bb_annotation");
+  }
+  bb_ann->shm_addr = shmat(bb_ann->shm_id, NULL, 0);
+  if (bb_ann->shm_addr == (void*) -1) {
+    PFATAL("failed to get shm addr for bb_annotation");
+  }
+  shmctl(bb_ann->shm_id, IPC_RMID, NULL);
   list_append(&afl->bb_anotations, bb_ann);
 
   char cmd[4] = "EANR";
   write_to_command_pipe(&cmd, 4);
   write_to_command_pipe(&bb_ann->pos, sizeof(bb_ann->pos));
+  write_to_command_pipe(&bb_ann->shm_id, sizeof(bb_ann->shm_id));
 
   annotation_action_t action = END;
   while (1) {
@@ -2331,6 +2348,7 @@ static void __zmq_deannotation_req(afl_state_t * afl) {
   LIST_FOREACH(&afl->bb_anotations, bb_annotation_t, {
     if (el->pos == pos) {
       LIST_REMOVE_CURRENT_EL_IN_FOREACH();
+      shmdt(el->shm_addr);
       free(el);
       break;
     }
