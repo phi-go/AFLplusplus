@@ -2298,11 +2298,6 @@ static void __zmq_bb_req(afl_state_t * afl) {
   } while(0);
 
 static void __zmq_annotation_req(afl_state_t * afl) {
-      {
-        struct shm_info info;
-        shmctl(0, SHM_INFO, (void*) &info);
-        fprintf(stderr, "p: %d, num seg: %d\n", getpid(), info.used_ids);
-      }
   bb_annotation_t * bb_ann = calloc(1, sizeof(*bb_ann));
   if (bb_ann == NULL) {
     FATAL("failed to allocated bb_annotation %s:%d", __FILE__, __LINE__);

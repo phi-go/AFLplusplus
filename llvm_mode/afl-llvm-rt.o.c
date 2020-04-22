@@ -405,23 +405,66 @@ typedef struct pos_actions {
 bb_annotation_t * bb_annotations_map = NULL;
 pos_actions_t * pos_actions_map = NULL;
 
+__thread int num_tracings = 0;
+
 void sigtrap_handler(int signo, siginfo_t *si, void* arg)
 {
   assert(signo == SIGTRAP);
   ucontext_t *ctx = (ucontext_t *)arg;
-  // printf("INT3@%llx ", ctx->uc_mcontext.gregs[REG_RIP] - 1);
-  const uint8_t * pos = (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP] - 1;
+  const uint8_t * pos = (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP];
+  if (!(ctx->uc_mcontext.gregs[REG_EFL] & 0x100)) {
+    // trap flag is not set so the actual executed instruction is one byte earlier
+    // check that we wanted to start tracing one byte earlier
+    void * trace_start_pos = (void *)pos - 1;
+    int is_trace_start = 0;
+    pos_actions_t * trace_start_actions;
+    action_t * action;
+    HASH_FIND_PTR(pos_actions_map, &trace_start_pos, trace_start_actions);
+    if (!trace_start_actions) {
+      fprintf(stderr, "expected %p to be a trace start pos\n", trace_start_pos);
+      return;
+    }
+    LL_FOREACH2(trace_start_actions->actions, action, pos_next) {
+      if (action->action == START) {
+        is_trace_start = 1;
+        break;
+      }
+    }
+    if (!is_trace_start) {
+      fprintf(stderr, "expected %p to be a trace start pos but found no such action\n", trace_start_pos);
+      return;
+    }
+    // set trap flag to start tracing
+    num_tracings += 1;
+    ctx->uc_mcontext.gregs[REG_EFL] |= 0x100;
+  }
+
   pos_actions_t * actions;
   HASH_FIND_PTR(pos_actions_map, &pos, actions);
   if (actions) {
     // fprintf(stderr, "=== %p ", pos);
-    // action_t * el;
-    // LL_FOREACH2(actions->actions, el, pos_next) {
-    //   fprintf(stderr, "%p", el);
-    //   fprintf(stderr, " -> a%d %p %p\n", el->action, el->pos, el->bb_annotation_id);
-    // }
+    action_t * act;
+    // fprintf(stderr, "\n%p", pos);
+    LL_FOREACH2(actions->actions, act, pos_next) {
+
+      if (act->action == START) {
+        // already single step tracing otherwise we would be after the int3 instruction
+        // which is handled above
+        fprintf(stderr, "found another START while single step tracing");
+        num_tracings += 1;
+
+      } else if (act->action == STOP) {
+        num_tracings -= 1;
+
+      }
+    }
   } else {
     fprintf(stderr, "found NO actions for %p\n", pos);
+    // ctx->uc_mcontext.gregs[REG_EFL] &= ~0x100;
+  }
+  if (num_tracings <= 0) {
+    // unset trap flag
+    ctx->uc_mcontext.gregs[REG_EFL] &= ~0x100;
   }
 }
 
