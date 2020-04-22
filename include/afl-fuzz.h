@@ -573,6 +573,8 @@ typedef struct afl_state {
   void *zmq_context;
   void *zmq_socket;
 
+  list_t bb_anotations;
+
 #ifdef _AFL_DOCUMENT_MUTATIONS
   u8  do_document;
   u32 document_counter;

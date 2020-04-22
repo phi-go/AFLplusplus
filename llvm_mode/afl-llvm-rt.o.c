@@ -50,6 +50,9 @@
 
 #include <ucontext.h>
 
+#include <uthash.h>
+#include <utlist.h>
+
 #ifdef __linux__
 #include "snapshot-inl.h"
 #endif
@@ -364,49 +367,214 @@ static void __afl_start_snapshots(void) {
       _exit(1); \
     }
 
+#define NULL_CHECK(P) \
+  if (P == NULL) { \
+      fprintf(stderr, "ptr should not be null %s:%d\n", __FILE__, __LINE__); \
+      _exit(1); \
+  }
+
+struct BBReq {
+  void * pos;
+  int size;
+};
+
+typedef enum {END=1, START=2, STOP=3, NOP=4} annotation_action_t;
+
+typedef struct action {
+  void * bb_annotation_id;
+  void * pos;
+  struct action * bb_next;
+  struct action * pos_next;
+  annotation_action_t action;
+} action_t;
+
+typedef struct bb_annotation {
+  void * pos;
+  action_t * actions;
+  UT_hash_handle hh;
+} bb_annotation_t;
+
+typedef struct pos_actions {
+  void * pos;
+  action_t * actions;
+  UT_hash_handle hh;
+} pos_actions_t;
+
+bb_annotation_t * bb_annotations_map = NULL;
+pos_actions_t * pos_actions_map = NULL;
+
 void sigtrap_handler(int signo, siginfo_t *si, void* arg)
 {
   assert(signo == SIGTRAP);
   ucontext_t *ctx = (ucontext_t *)arg;
-  printf("INT3@%llx ", ctx->uc_mcontext.gregs[REG_RIP] - 1);
-  uint8_t* rip = ctx->uc_mcontext.gregs[REG_RIP]-1;
-  uint8_t* base = rip - ((uint64_t)rip)%4096;
-  assert(mprotect((void*)base, 4096 , PROT_READ|PROT_WRITE|PROT_EXEC )==0);
-  *rip=0x90; // replace int 3 by nop so we only have the interrupt once
-  assert(mprotect((void*)base, 4096 , PROT_READ|PROT_EXEC )==0);
-  ctx->uc_mcontext.gregs[REG_RIP] = rip;
+  // printf("INT3@%llx ", ctx->uc_mcontext.gregs[REG_RIP] - 1);
+  const uint8_t * pos = (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP] - 1;
+  pos_actions_t * actions;
+  HASH_FIND_PTR(pos_actions_map, &pos, actions);
+  if (actions) {
+    // fprintf(stderr, "=== %p ", pos);
+    // action_t * el;
+    // LL_FOREACH2(actions->actions, el, pos_next) {
+    //   fprintf(stderr, "%p", el);
+    //   fprintf(stderr, " -> a%d %p %p\n", el->action, el->pos, el->bb_annotation_id);
+    // }
+  } else {
+    fprintf(stderr, "found NO actions for %p\n", pos);
+  }
 }
-
-struct BBReq {
-  intptr_t pos;
-  int size;
-};
 
 static void __afl_handle_bb_req(void) {
     struct BBReq req;
     read_from_command_pipe(req);
-    write_to_command_pipe((void *)req.pos, req.size);
+    write_to_command_pipe(req.pos, req.size);
 }
 
-static void __afl_handle_ann_req(void) {
-  uint8_t * pos = NULL;
-  read_from_command_pipe(pos);
-  fprintf(stderr, "EANR req %p\n", pos);
-  uint8_t* base = pos - ((uint64_t)pos)%4096;
-  assert(mprotect((void*)base, 4096 , PROT_READ|PROT_WRITE|PROT_EXEC )==0);
-  *pos = 0xcc;
-  assert(mprotect((void*)base, 4096 , PROT_READ|PROT_EXEC )==0);
-  // TODO return command success?
-}
-
-static void __afl_handle_deann_req(void) {
-  uint8_t * pos = NULL;
-  read_from_command_pipe(pos);
-  fprintf(stderr, "DANR req %p\n", pos);
+void to_nop_instruction(uint8_t * pos) {
+  if (*pos != 0xcc) {
+      fprintf(stderr, "deann req pos (%lx) is not 0xcc but 0x%x\n", pos, *pos);
+      _exit(1);
+  }
   uint8_t* base = pos - ((uint64_t)pos)%4096;
   assert(mprotect((void*)base, 4096 , PROT_READ|PROT_WRITE|PROT_EXEC )==0);
   *pos = 0x90;
   assert(mprotect((void*)base, 4096 , PROT_READ|PROT_EXEC )==0);
+}
+
+void add_action(void * bb_annotation_id, void * action_pos, annotation_action_t action_type) {
+
+  // create the action struct
+  action_t * action = calloc(1, sizeof(*action));
+  NULL_CHECK(action);
+  action->bb_annotation_id = bb_annotation_id;
+  action->pos = action_pos;
+  action->action = action_type;
+
+  // get action list for position
+  pos_actions_t * pos_actions;
+  HASH_FIND_PTR(pos_actions_map, &action->pos, pos_actions);
+
+  // if action list does not exist -> create it
+  if (pos_actions == NULL) {
+    pos_actions = calloc(1, sizeof(*pos_actions));
+    NULL_CHECK(pos_actions);
+    pos_actions->pos = action->pos;
+    pos_actions->actions = NULL;
+    HASH_ADD_PTR(pos_actions_map, pos, pos_actions);
+  }
+
+  // insert action struct
+  LL_PREPEND2(pos_actions->actions, action, pos_next);
+  // AL_PREPEND(pos_actions->actions, action);
+
+  // add action to bb_annotation map 
+  bb_annotation_t * annotation;
+  HASH_FIND_PTR(bb_annotations_map, &action->bb_annotation_id, annotation);
+  if (annotation == NULL) {
+      fprintf(stderr, "expected annotation for %p to exist\n", action->bb_annotation_id);
+      _exit(1);
+  }
+  LL_PREPEND2(annotation->actions, action, bb_next);
+}
+
+void remove_bb_annotation(void * bb_annotation_id) {
+  // find bb annotation
+  bb_annotation_t * annotation;
+  HASH_FIND_PTR(bb_annotations_map, &bb_annotation_id, annotation);
+  if (annotation == NULL) {
+      fprintf(stderr, "expected annotation for %p to exist\n", bb_annotation_id);
+      _exit(1);
+  }
+
+  // for all actions belonging to bb annotation find them and remove them
+  action_t * el = NULL;
+  action_t * tmp = NULL;
+  LL_FOREACH_SAFE2(annotation->actions, el, tmp, bb_next) {
+    LL_DELETE2(annotation->actions, el, bb_next);
+    pos_actions_t * pos_action;
+    HASH_FIND_PTR(pos_actions_map, &el->pos, pos_action);
+    if (!pos_action) {
+      fprintf(stderr, "expected pos_action for %p to exist\n", el->pos);
+    }
+    LL_DELETE2(pos_action->actions, el, pos_next);
+    action_t * count_el = NULL;
+    int count = -1;
+    LL_COUNT2(pos_action->actions, count_el, count, pos_next);
+    if (count == 0) {
+      HASH_DEL(pos_actions_map, pos_action);
+      free(pos_action);
+    }
+    if (el->action == START) {
+      to_nop_instruction(el->pos);
+    }
+    free(el);
+  }
+
+  // free bb annotation
+  HASH_DEL(bb_annotations_map, annotation);
+  free(annotation);
+
+  fprintf(stderr, "there are %d annotations, %d actions\n",
+          HASH_COUNT(bb_annotations_map), HASH_COUNT(pos_actions_map));
+}
+
+static void __afl_handle_ann_req(void) {
+  // get bb_annotation
+  bb_annotation_t * bb_ann = calloc(1, sizeof(*bb_ann));
+  NULL_CHECK(bb_ann);
+  bb_ann->actions = NULL;
+  read_from_command_pipe(bb_ann->pos);
+  HASH_ADD_PTR(bb_annotations_map, pos, bb_ann);
+
+  // get all actions for that bb_annotation
+  uint8_t * trace_start = NULL;
+  annotation_action_t action = END;
+  while (1) {
+    uint8_t * action_pos;
+    read_from_command_pipe(action);
+    if (action == END) {
+      break;
+
+    } else if (action == START) {
+      read_from_command_pipe(action_pos);
+      if (trace_start != NULL){ 
+          fprintf(stderr, "only expected one trace_start (%p) but got (%p)\n",
+                  trace_start, action_pos);
+          _exit(1);
+      }
+      trace_start = action_pos;
+      add_action(bb_ann->pos, action_pos, action);
+
+    } else if (action == STOP) {
+      read_from_command_pipe(action_pos);
+      add_action(bb_ann->pos, action_pos, action);
+      
+    } else if (action == NOP) {
+      read_from_command_pipe(action_pos);
+      add_action(bb_ann->pos, action_pos, action);
+
+    } else {
+      fprintf(stderr, "Unknown annotation action: %d", action);
+    }
+  }
+
+  // set breakpoint to start tracing
+  if (*trace_start != 0x90) {
+      fprintf(stderr, "ann req pos (%p) is not 0x90 but 0x%x\n", trace_start, *trace_start);
+      _exit(1);
+  }
+  uint8_t* base = trace_start - ((uint64_t)trace_start)%4096;
+  assert(mprotect((void*)base, 4096 , PROT_READ|PROT_WRITE|PROT_EXEC )==0);
+  *(char *)trace_start = 0xcc;
+  assert(mprotect((void*)base, 4096 , PROT_READ|PROT_EXEC )==0);
+
+  fprintf(stderr, "there are %d annotations, %d actions\n",
+          HASH_COUNT(bb_annotations_map), HASH_COUNT(pos_actions_map));
+}
+
+static void __afl_handle_deann_req(void) {
+  void * pos = 0;
+  read_from_command_pipe(pos);
+  remove_bb_annotation(pos);
   // TODO return command success?
 }
 

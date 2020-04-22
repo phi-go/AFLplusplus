@@ -2192,7 +2192,7 @@ void connect_zmq(afl_state_t * afl) {
   afl->zmq_context = zmq_ctx_new();
   afl->zmq_socket = zmq_socket(afl->zmq_context, ZMQ_DEALER);
   zmq_setsockopt(afl->zmq_socket, ZMQ_IDENTITY, zmq_id, strlen(zmq_id)); 
-  
+
   if (zmq_connect(afl->zmq_socket, afl_zmq_url) != 0) {
     printf("ZMQ error: %s\n", strerror(errno));
     afl->zmq_context = NULL;
@@ -2256,6 +2256,12 @@ struct BBReq {
   int size;
 };
 
+typedef enum {END=1, START=2, STOP=3, NOP=4} annotation_action_t;
+
+typedef struct bb_annotation {
+  void * pos;
+} bb_annotation_t;
+
 #define MAX_BB_SIZE 4096
 
 static void __zmq_bb_req(afl_state_t * afl) {
@@ -2281,25 +2287,54 @@ static void __zmq_bb_req(afl_state_t * afl) {
   z_send(&bb_content, req.size, 0);
 }
 
-static void __zmq_annotation_req(afl_state_t * afl) {
-  // const int MAX_ANN_SIZE = 1024;
-  unsigned long pos;
-  char annotation [1024] = {0};
-  // int ann_len;
-  z_read(&pos);
-  z_read(&annotation);
-  fprintf(stderr, "ZMQ ann: %lx %s\n", pos, annotation);
+#define FORWARD_ANN_ACTION()                                 \
+  do {                                                       \
+    uint8_t * action_pos;                                    \
+    z_read(&action_pos);                                     \
+    write_to_command_pipe(&action, sizeof(action));          \
+    write_to_command_pipe(&action_pos, sizeof(action_pos));  \
+  } while(0);
 
-  // send command
+static void __zmq_annotation_req(afl_state_t * afl) {
+  bb_annotation_t * bb_ann = calloc(1, sizeof(bb_annotation_t));
+  if (bb_ann == NULL) {
+    FATAL("failed to allocated bb_annotation %s:%d", __FILE__, __LINE__);
+  }
+  z_read(&bb_ann->pos);
+  list_append(&afl->bb_anotations, bb_ann);
+
   char cmd[4] = "EANR";
   write_to_command_pipe(&cmd, 4);
-  write_to_command_pipe(&pos, sizeof(pos));
+  write_to_command_pipe(&bb_ann->pos, sizeof(bb_ann->pos));
+
+  annotation_action_t action = END;
+  while (1) {
+    z_read(&action);
+    if (action == END) {
+      write_to_command_pipe(&action, sizeof(action));
+      break;
+    } else if (action == START) {
+      FORWARD_ANN_ACTION();
+    } else if (action == STOP) {
+      FORWARD_ANN_ACTION();
+    } else if (action == NOP) {
+      FORWARD_ANN_ACTION();
+    } else {
+      FATAL("Unknown annotation action: %d", action);
+    }
+  }
 }
 
 static void __zmq_deannotation_req(afl_state_t * afl) {
-  unsigned long pos;
+  void * pos;
   z_read(&pos)
-  fprintf(stderr, "ZMQ deann: %lx\n", pos);
+  LIST_FOREACH(&afl->bb_anotations, bb_annotation_t, {
+    if (el->pos == pos) {
+      LIST_REMOVE_CURRENT_EL_IN_FOREACH();
+      free(el);
+      break;
+    }
+  });
 
   // send command
   char cmd[4] = "DANR";
