@@ -434,17 +434,14 @@ void sigtrap_handler(int signo, siginfo_t *si, void* arg)
       fprintf(stderr, "expected %p to be a trace start pos but found no such action\n", trace_start_pos);
       return;
     }
-    // set trap flag to start tracing
+
     num_tracings += 1;
-    ctx->uc_mcontext.gregs[REG_EFL] |= 0x100;
   }
 
   pos_actions_t * actions;
   HASH_FIND_PTR(pos_actions_map, &pos, actions);
   if (actions) {
-    // fprintf(stderr, "=== %p ", pos);
     action_t * act;
-    // fprintf(stderr, "\n%p", pos);
     LL_FOREACH2(actions->actions, act, pos_next) {
 
       if (act->action == START) {
@@ -460,12 +457,16 @@ void sigtrap_handler(int signo, siginfo_t *si, void* arg)
     }
   } else {
     fprintf(stderr, "found NO actions for %p\n", pos);
-    // ctx->uc_mcontext.gregs[REG_EFL] &= ~0x100;
-  }
-  if (num_tracings <= 0) {
-    // unset trap flag
     ctx->uc_mcontext.gregs[REG_EFL] &= ~0x100;
   }
+  
+  // if (num_tracings > 0) {
+  //   // set trap flag to start tracing
+  //   ctx->uc_mcontext.gregs[REG_EFL] |= 0x100;
+  // } else {
+  //   // unset trap flag
+  //   ctx->uc_mcontext.gregs[REG_EFL] &= ~0x100;
+  // }
 }
 
 static void __afl_handle_bb_req(void) {
@@ -611,8 +612,8 @@ static void __afl_handle_ann_req(void) {
   }
 
   // set breakpoint to start tracing
-  if (*trace_start != 0x90) {
-      fprintf(stderr, "ann req pos (%p) is not 0x90 but 0x%x\n", trace_start, *trace_start);
+  if (*trace_start != 0x90 && *trace_start != 0xCC) {
+      fprintf(stderr, "ann req pos (%p) is not 0x90 or 0xCC but 0x%x\n", trace_start, *trace_start);
       _exit(1);
   }
   uint8_t* base = trace_start - ((uint64_t)trace_start)%4096;
