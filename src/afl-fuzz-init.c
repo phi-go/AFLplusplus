@@ -2225,11 +2225,11 @@ static int64_t __zmq_has_more(afl_state_t * afl) {
       FATAL("ZMQ send error: %s in %s:%d\n", zmq_strerror(errno), __FILE__, __LINE__); \
     }
 
-#define z_read(V) \
+#define Z_READ(V, S) \
   if (!__zmq_has_more(afl)) { \
     FATAL("ZMQ expected more message parts %s:%d", __FILE__, __LINE__); \
   } \
-  if (zmq_recv(afl->zmq_socket, V, sizeof(V), 0) == -1) { \
+  if (zmq_recv(afl->zmq_socket, V, S, 0) == -1) { \
     FATAL("ZMQ recv error: %s in %s:%d\n", zmq_strerror(errno), __FILE__, __LINE__); \
   }
 
@@ -2256,7 +2256,7 @@ struct BBReq {
   int size;
 };
 
-typedef enum {END=1, START=2, STOP=3, NOP=4} annotation_action_t;
+typedef enum {NO_MORE=-1, CMP=1} annotation_action_t;
 
 typedef struct bb_annotation {
   void * pos;
@@ -2269,8 +2269,8 @@ typedef struct bb_annotation {
 static void __zmq_bb_req(afl_state_t * afl) {
   char bb_content [MAX_BB_SIZE];
   struct BBReq req;
-  z_read(&req.pos);
-  z_read(&req.size);
+  Z_READ(&req.pos, sizeof(req.pos));
+  Z_READ(&req.size, sizeof(req.size));
   if (req.size > MAX_BB_SIZE) {
     FATAL("BB size is too large %d", req.size);
   }
@@ -2289,20 +2289,14 @@ static void __zmq_bb_req(afl_state_t * afl) {
   z_send(&bb_content, req.size, 0);
 }
 
-#define FORWARD_ANN_ACTION()                                 \
-  do {                                                       \
-    uint8_t * action_pos;                                    \
-    z_read(&action_pos);                                     \
-    write_to_command_pipe(&action, sizeof(action));          \
-    write_to_command_pipe(&action_pos, sizeof(action_pos));  \
-  } while(0);
+#define MAX_INSTRUCTION_SIZE 16
 
 static void __zmq_annotation_req(afl_state_t * afl) {
   bb_annotation_t * bb_ann = calloc(1, sizeof(*bb_ann));
   if (bb_ann == NULL) {
     FATAL("failed to allocated bb_annotation %s:%d", __FILE__, __LINE__);
   }
-  z_read(&bb_ann->pos);
+  Z_READ(&bb_ann->pos, sizeof(bb_ann->pos));
   bb_ann->shm_id = shmget(IPC_PRIVATE, sysconf(_SC_PAGESIZE), IPC_CREAT | IPC_EXCL | 0600);
   if (bb_ann->shm_id == -1) {
     PFATAL("failed to get shm for bb_annotation");
@@ -2319,27 +2313,32 @@ static void __zmq_annotation_req(afl_state_t * afl) {
   write_to_command_pipe(&bb_ann->pos, sizeof(bb_ann->pos));
   write_to_command_pipe(&bb_ann->shm_id, sizeof(bb_ann->shm_id));
 
-  annotation_action_t action = END;
-  while (1) {
-    z_read(&action);
-    if (action == END) {
-      write_to_command_pipe(&action, sizeof(action));
-      break;
-    } else if (action == START) {
-      FORWARD_ANN_ACTION();
-    } else if (action == STOP) {
-      FORWARD_ANN_ACTION();
-    } else if (action == NOP) {
-      FORWARD_ANN_ACTION();
-    } else {
-      FATAL("Unknown annotation action: %d", action);
+  while (__zmq_has_more(afl)) {
+    annotation_action_t action;
+    uint8_t * action_pos;
+    uint8_t instruction_size;
+    char instruction_bytes[MAX_INSTRUCTION_SIZE] = {0};
+
+    Z_READ(&action, sizeof(action));
+    Z_READ(&action_pos, sizeof(action_pos));
+    Z_READ(&instruction_size, sizeof(instruction_size));
+    if (instruction_size > MAX_INSTRUCTION_SIZE) {
+      FATAL("Instruction is longer %d than expected.", instruction_size);
     }
+    Z_READ(&instruction_bytes, instruction_size);
+
+    write_to_command_pipe(&action, sizeof(action));
+    write_to_command_pipe(&action_pos, sizeof(action_pos));
+    write_to_command_pipe(&instruction_size, sizeof(instruction_size));
+    write_to_command_pipe(&instruction_bytes, instruction_size);
   }
+  annotation_action_t no_more = NO_MORE;
+  write_to_command_pipe(&no_more, sizeof(no_more));
 }
 
 static void __zmq_deannotation_req(afl_state_t * afl) {
   void * pos;
-  z_read(&pos)
+  Z_READ(&pos, sizeof(pos))
   LIST_FOREACH(&afl->bb_anotations, bb_annotation_t, {
     if (el->pos == pos) {
       LIST_REMOVE_CURRENT_EL_IN_FOREACH();

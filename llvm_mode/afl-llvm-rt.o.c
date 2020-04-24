@@ -361,6 +361,12 @@ static void __afl_start_snapshots(void) {
       _exit(1); \
     }
 
+#define READ_FROM_COMMAND_PIPE2(V, S) \
+    if ((read(FORKSRV_FD + 2, V, S) != S)) { \
+      fprintf(stderr, "command read failed %s:%d\n", __FILE__, __LINE__); \
+      _exit(1); \
+    }
+
 #define write_to_command_pipe(V, S) \
     if ((write(FORKSRV_FD + 3, V, S) != S)) { \
       fprintf(stderr, "command write failed %s:%d\n", __FILE__, __LINE__); \
@@ -378,14 +384,18 @@ struct BBReq {
   int size;
 };
 
-typedef enum {END=1, START=2, STOP=3, NOP=4} annotation_action_t;
+typedef enum {NO_MORE=-1, CMP=1} annotation_action_t;
+
+#define MAX_INSTRUCTION_SIZE 16
 
 typedef struct action {
+  annotation_action_t action;
+  uint8_t * pos;
+  uint8_t instruction_size;
+  char instruction_bytes[MAX_INSTRUCTION_SIZE];
   void * bb_annotation_id;
-  void * pos;
   struct action * bb_next;
   struct action * pos_next;
-  annotation_action_t action;
 } action_t;
 
 typedef struct bb_annotation {
@@ -405,121 +415,107 @@ typedef struct pos_actions {
 bb_annotation_t * bb_annotations_map = NULL;
 pos_actions_t * pos_actions_map = NULL;
 
-__thread int num_tracings = 0;
+__thread unsigned int single_step_size = 0;
+
+void set_breakpoint(action_t * action, int quiet) {
+  if (!(*action->pos == 0xCC || *action->pos == (uint8_t)action->instruction_bytes[0])) {
+      fprintf(stderr, "ann req pos (%p) is not 0xCC or expected initial 0x%x but 0x%x\n",
+      action->pos, (uint8_t)action->instruction_bytes[0], *action->pos);
+      _exit(1);
+  }
+  if (!quiet) {
+    fprintf(stderr, "setting breakpoint at %p\n", action->pos);
+  }
+
+  uint8_t* base = action->pos - ((uint64_t)action->pos)%4096;
+  // TODO find initial protections to restore them
+  assert(mprotect((void*)base, 4096 , PROT_READ|PROT_WRITE|PROT_EXEC )==0);
+  *(uint8_t*)action->pos = 0xcc;
+  assert(mprotect((void*)base, 4096 , PROT_READ|PROT_EXEC )==0);
+}
+
+void remove_breakpoint(action_t * action, int quiet) {
+  if (*action->pos != 0xcc) {
+      fprintf(stderr, "deann req pos (%lx) is not 0xcc but 0x%x\n", action->pos, *action->pos);
+      _exit(1);
+  }
+  if (!quiet) {
+    fprintf(stderr, "removing breakpoint at %p\n", action->pos);
+  }
+
+  uint8_t* base = action->pos - ((uint64_t)action->pos)%4096;
+  // TODO find initial protections to restore them
+  assert(mprotect((void*)base, 4096 , PROT_READ|PROT_WRITE|PROT_EXEC )==0);
+  *(uint8_t*)action->pos = (uint8_t)action->instruction_bytes[0];
+  assert(mprotect((void*)base, 4096 , PROT_READ|PROT_EXEC )==0);
+}
+
+#define CHECK_BIT(var,pos) (!!((var) & (pos)))
 
 void sigtrap_handler(int signo, siginfo_t *si, void* arg)
 {
   assert(signo == SIGTRAP);
   ucontext_t *ctx = (ucontext_t *)arg;
-  const uint8_t * pos = (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP];
-  if (!(ctx->uc_mcontext.gregs[REG_EFL] & 0x100)) {
-    // trap flag is not set so the actual executed instruction is one byte earlier
-    // check that we wanted to start tracing one byte earlier
-    void * trace_start_pos = (void *)pos - 1;
-    int is_trace_start = 0;
-    pos_actions_t * trace_start_actions;
-    action_t * action;
-    HASH_FIND_PTR(pos_actions_map, &trace_start_pos, trace_start_actions);
-    if (!trace_start_actions) {
-      fprintf(stderr, "expected %p to be a trace start pos\n", trace_start_pos);
-      return;
+  if (single_step_size == 0) {
+    // we only expect to land here if we set a bp, a bp (0xcc / int 3) is one byte long
+    // and instructions are completed before we get to the signal handler
+    // so subtract one from our position
+    const uint8_t * pos = (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP] - 1;
+
+    pos_actions_t * actions;
+    HASH_FIND_PTR(pos_actions_map, &pos, actions);
+    if (actions) {
+      action_t * act = actions->actions;
+
+      // restore old instruction and single step once then we can get the result
+      single_step_size = act->instruction_size;
+      
+      // set trap flag to start tracing
+      ctx->uc_mcontext.gregs[REG_EFL] |= 0x100;
+
+      // set RIP so that instruction is repeated
+      ctx->uc_mcontext.gregs[REG_RIP] -= 1;
+
+      remove_breakpoint(act, /*quiet*/ 1);
+    } else {
+      fprintf(stderr, "no actions for %p found (before stepping)\n", pos);
     }
-    LL_FOREACH2(trace_start_actions->actions, action, pos_next) {
-      if (action->action == START) {
-        is_trace_start = 1;
-        break;
-      }
-    }
-    if (!is_trace_start) {
-      fprintf(stderr, "expected %p to be a trace start pos but found no such action\n", trace_start_pos);
-      return;
-    }
-
-    num_tracings += 1;
-  }
-
-  pos_actions_t * actions;
-  HASH_FIND_PTR(pos_actions_map, &pos, actions);
-  if (actions) {
-    action_t * act;
-    LL_FOREACH2(actions->actions, act, pos_next) {
-
-      if (act->action == START) {
-        // already single step tracing otherwise we would be after the int3 instruction
-        // which is handled above
-        fprintf(stderr, "found another START while single step tracing");
-        num_tracings += 1;
-
-      } else if (act->action == STOP) {
-        num_tracings -= 1;
-
-      }
-    }
+    return;
   } else {
-    fprintf(stderr, "found NO actions for %p\n", pos);
+    const uint8_t * pos = (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP] - single_step_size;
+    pos_actions_t * actions;
+    HASH_FIND_PTR(pos_actions_map, &pos, actions);
+    if (actions) {
+      action_t * act = actions->actions;
+      set_breakpoint(act, /*quiet*/ 1);
+      LL_FOREACH2(actions->actions, act, pos_next) {
+        if (act->action == CMP) {
+          // int CF = CHECK_BIT(ctx->uc_mcontext.gregs[REG_EFL], 0x0001);
+          // int OF = CHECK_BIT(ctx->uc_mcontext.gregs[REG_EFL], 0x0800);
+          // int SF = CHECK_BIT(ctx->uc_mcontext.gregs[REG_EFL], 0x0080);
+          // int ZF = CHECK_BIT(ctx->uc_mcontext.gregs[REG_EFL], 0x0040);
+          // int AF = CHECK_BIT(ctx->uc_mcontext.gregs[REG_EFL], 0x0010);
+          // int PF = CHECK_BIT(ctx->uc_mcontext.gregs[REG_EFL], 0x0004);
+
+          // fprintf(stderr, "(%p) CF:%d OF:%d SF:%d ZF:%d AF:%d PF:%d\n", act->pos, CF, OF, SF, ZF, AF, PF);
+        }
+      }
+    } else {
+      fprintf(stderr, "no actions for %p found (after stepping %d - real pos %p)\n",
+              pos, single_step_size, (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP]);
+    }
+
+    // unset trap flag
     ctx->uc_mcontext.gregs[REG_EFL] &= ~0x100;
+
+    single_step_size = 0;
   }
-  
-  // if (num_tracings > 0) {
-  //   // set trap flag to start tracing
-  //   ctx->uc_mcontext.gregs[REG_EFL] |= 0x100;
-  // } else {
-  //   // unset trap flag
-  //   ctx->uc_mcontext.gregs[REG_EFL] &= ~0x100;
-  // }
 }
 
 static void __afl_handle_bb_req(void) {
     struct BBReq req;
     read_from_command_pipe(req);
     write_to_command_pipe(req.pos, req.size);
-}
-
-void to_nop_instruction(uint8_t * pos) {
-  if (*pos != 0xcc) {
-      fprintf(stderr, "deann req pos (%lx) is not 0xcc but 0x%x\n", pos, *pos);
-      _exit(1);
-  }
-  uint8_t* base = pos - ((uint64_t)pos)%4096;
-  assert(mprotect((void*)base, 4096 , PROT_READ|PROT_WRITE|PROT_EXEC )==0);
-  *pos = 0x90;
-  assert(mprotect((void*)base, 4096 , PROT_READ|PROT_EXEC )==0);
-}
-
-void add_action(void * bb_annotation_id, void * action_pos, annotation_action_t action_type) {
-
-  // create the action struct
-  action_t * action = calloc(1, sizeof(*action));
-  NULL_CHECK(action);
-  action->bb_annotation_id = bb_annotation_id;
-  action->pos = action_pos;
-  action->action = action_type;
-
-  // get action list for position
-  pos_actions_t * pos_actions;
-  HASH_FIND_PTR(pos_actions_map, &action->pos, pos_actions);
-
-  // if action list does not exist -> create it
-  if (pos_actions == NULL) {
-    pos_actions = calloc(1, sizeof(*pos_actions));
-    NULL_CHECK(pos_actions);
-    pos_actions->pos = action->pos;
-    pos_actions->actions = NULL;
-    HASH_ADD_PTR(pos_actions_map, pos, pos_actions);
-  }
-
-  // insert action struct
-  LL_PREPEND2(pos_actions->actions, action, pos_next);
-  // AL_PREPEND(pos_actions->actions, action);
-
-  // add action to bb_annotation map 
-  bb_annotation_t * annotation;
-  HASH_FIND_PTR(bb_annotations_map, &action->bb_annotation_id, annotation);
-  if (annotation == NULL) {
-      fprintf(stderr, "expected annotation for %p to exist\n", action->bb_annotation_id);
-      _exit(1);
-  }
-  LL_PREPEND2(annotation->actions, action, bb_next);
 }
 
 void remove_bb_annotation(void * bb_annotation_id) {
@@ -548,10 +544,11 @@ void remove_bb_annotation(void * bb_annotation_id) {
     if (count == 0) {
       HASH_DEL(pos_actions_map, pos_action);
       free(pos_action);
+
+      // remove breakpoint
+      remove_breakpoint(el, /*quiet*/ 0);
     }
-    if (el->action == START) {
-      to_nop_instruction(el->pos);
-    }
+
     free(el);
   }
 
@@ -580,46 +577,43 @@ static void __afl_handle_ann_req(void) {
   HASH_ADD_PTR(bb_annotations_map, pos, bb_ann);
 
   // get all actions for that bb_annotation
-  uint8_t * trace_start = NULL;
-  annotation_action_t action = END;
   while (1) {
-    uint8_t * action_pos;
-    read_from_command_pipe(action);
-    if (action == END) {
+    annotation_action_t action_type;
+    read_from_command_pipe(action_type);
+    if (action_type == NO_MORE) {
       break;
-
-    } else if (action == START) {
-      read_from_command_pipe(action_pos);
-      if (trace_start != NULL){ 
-          fprintf(stderr, "only expected one trace_start (%p) but got (%p)\n",
-                  trace_start, action_pos);
-          _exit(1);
-      }
-      trace_start = action_pos;
-      add_action(bb_ann->pos, action_pos, action);
-
-    } else if (action == STOP) {
-      read_from_command_pipe(action_pos);
-      add_action(bb_ann->pos, action_pos, action);
-      
-    } else if (action == NOP) {
-      read_from_command_pipe(action_pos);
-      add_action(bb_ann->pos, action_pos, action);
-
-    } else {
-      fprintf(stderr, "Unknown annotation action: %d", action);
     }
-  }
 
-  // set breakpoint to start tracing
-  if (*trace_start != 0x90 && *trace_start != 0xCC) {
-      fprintf(stderr, "ann req pos (%p) is not 0x90 or 0xCC but 0x%x\n", trace_start, *trace_start);
-      _exit(1);
+    action_t * action = calloc(1, sizeof(*action));
+    NULL_CHECK(action);
+    action->action = action_type;
+    read_from_command_pipe(action->pos);
+    read_from_command_pipe(action->instruction_size);
+    READ_FROM_COMMAND_PIPE2(&action->instruction_bytes, action->instruction_size);
+    action->bb_annotation_id = bb_ann->pos;
+    action->bb_next = NULL;
+    action->pos_next = NULL;
+
+    // get action list for position
+    pos_actions_t * pos_actions;
+    HASH_FIND_PTR(pos_actions_map, &action->pos, pos_actions);
+
+    // if action list does not exist -> create it
+    if (pos_actions == NULL) {
+      pos_actions = calloc(1, sizeof(*pos_actions));
+      NULL_CHECK(pos_actions);
+      pos_actions->pos = action->pos;
+      pos_actions->actions = NULL;
+      HASH_ADD_PTR(pos_actions_map, pos, pos_actions);
+    }
+
+    // insert action struct
+    LL_PREPEND2(pos_actions->actions, action, pos_next);
+    LL_PREPEND2(bb_ann->actions, action, bb_next);
+
+    // set breakpoint to enable action
+    set_breakpoint(action, /*quiet*/ 0);
   }
-  uint8_t* base = trace_start - ((uint64_t)trace_start)%4096;
-  assert(mprotect((void*)base, 4096 , PROT_READ|PROT_WRITE|PROT_EXEC )==0);
-  *(char *)trace_start = 0xcc;
-  assert(mprotect((void*)base, 4096 , PROT_READ|PROT_EXEC )==0);
 
   fprintf(stderr, "there are %d annotations, %d actions\n",
           HASH_COUNT(bb_annotations_map), HASH_COUNT(pos_actions_map));
