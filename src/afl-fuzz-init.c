@@ -2288,6 +2288,16 @@ static void __zmq_bb_req(afl_state_t * afl) {
   z_send(&bb_content, req.size, 0);
 }
 
+void reset_annotations(afl_state_t * afl) {
+  if (!get_head(&afl->bb_anotations)->next) {
+    // no annotations yet
+    return;
+  }
+  LIST_FOREACH(&afl->bb_anotations, bb_annotation_t, {
+    *(uint64_t*)el->shm_addr = 0;
+  });
+}
+
 #define MAX_INSTRUCTION_SIZE 16
 
 static void __zmq_annotation_req(afl_state_t * afl) {

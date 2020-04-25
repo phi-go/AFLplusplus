@@ -929,6 +929,7 @@ void   connect_zmq(afl_state_t *);
 void   disconnect_zmq(afl_state_t *);
 void   zmq_send_file_path(afl_state_t *, char *, u64);
 void   zmq_handle_commands(afl_state_t *);
+void   reset_annotations(afl_state_t *);
 
 /* CmpLog */
 

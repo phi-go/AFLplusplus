@@ -502,6 +502,13 @@ void remove_breakpoint(action_t * action, int quiet) {
   } \
   V = *stack_ptr;
 
+#define BC_PEEK(V) \
+  if (stack_ptr-1 < stack) { \
+    fprintf(stderr, "bc stack underflow"); \
+    _exit(1); \
+  } \
+  V = *(stack_ptr-1);
+
 #define BC_PRINT_STACK() \
   uint64_t * p = stack_ptr; \
   fprintf(stderr, "^^^^^^^^^\n");  \
@@ -561,7 +568,7 @@ uint64_t bc_get_mem(annotation_byte_code_t segment_reg,
 }
 
 void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_len,
-                     ucontext_t * ctx, int verbose) {
+                     ucontext_t * ctx, action_t * action, int verbose) {
   int i = 0;
   uint64_t stack[BC_MAX_STACK];
   uint64_t * stack_ptr = stack;
@@ -605,7 +612,25 @@ void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_len,
         }
         break;
       case goal_min:
-        // TODO if min value write to shm
+        {
+          bb_annotation_t * annotation;
+          HASH_FIND_PTR(bb_annotations_map, &action->bb_annotation_id, annotation);
+          NULL_CHECK(annotation);
+          NULL_CHECK(annotation->shm_addr);
+          uint64_t * annotation_used = annotation->shm_addr;
+          uint64_t * annotation_res = (uint64_t*)annotation->shm_addr + 1;
+          uint64_t old_res = *annotation_res;
+          uint64_t new_res;
+          // TODO this is not thread safe
+          BC_PEEK(new_res);
+          if (!*annotation_used) {
+            *annotation_used = 1;
+            *annotation_res = new_res;
+          } else if (new_res < old_res) {
+            printf("ann seen (%p), old: %d new %d\n", action->pos, old_res, new_res);
+            *annotation_res = new_res;
+          }
+        }
         break;
       default:
         fprintf(stderr, "unhandled bc: %s(%d) \n", bc_str(byte_code[i-1]), byte_code[i-1]);
@@ -636,6 +661,7 @@ void sigtrap_handler(int signo, siginfo_t *si, void* arg)
       ctx->uc_mcontext.gregs[REG_EFL] |= 0x100;
 
       // set RIP so that instruction is repeated
+      // TODO displaced stepping or emulate instruction -> to make this thread safe
       ctx->uc_mcontext.gregs[REG_RIP] -= 1;
 
       remove_breakpoint(act, /*quiet*/ 1);
@@ -652,7 +678,7 @@ void sigtrap_handler(int signo, siginfo_t *si, void* arg)
       set_breakpoint(act, /*quiet*/ 1);
       LL_FOREACH2(actions->actions, act, pos_next) {
         int verbose = act->pos == (uint8_t*)0x0; // for debugging purposes
-        exec_annotation(act->byte_code, act->byte_code_len, ctx, verbose);
+        exec_annotation(act->byte_code, act->byte_code_len, ctx, act, verbose);
       }
     } else {
       fprintf(stderr, "no actions for %p found (after stepping %d - real pos %p)\n",
