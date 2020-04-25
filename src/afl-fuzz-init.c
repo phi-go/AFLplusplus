@@ -2256,7 +2256,6 @@ struct BBReq {
   int size;
 };
 
-typedef enum {NO_MORE=-1, CMP=1} annotation_action_t;
 
 typedef struct bb_annotation {
   void * pos;
@@ -2314,25 +2313,36 @@ static void __zmq_annotation_req(afl_state_t * afl) {
   write_to_command_pipe(&bb_ann->shm_id, sizeof(bb_ann->shm_id));
 
   while (__zmq_has_more(afl)) {
-    annotation_action_t action;
     uint8_t * action_pos;
-    uint8_t instruction_size;
-    char instruction_bytes[MAX_INSTRUCTION_SIZE] = {0};
-
-    Z_READ(&action, sizeof(action));
     Z_READ(&action_pos, sizeof(action_pos));
+    write_to_command_pipe(&action_pos, sizeof(action_pos));
+
+    uint8_t instruction_size;
     Z_READ(&instruction_size, sizeof(instruction_size));
     if (instruction_size > MAX_INSTRUCTION_SIZE) {
       FATAL("Instruction is longer %d than expected.", instruction_size);
     }
-    Z_READ(&instruction_bytes, instruction_size);
-
-    write_to_command_pipe(&action, sizeof(action));
-    write_to_command_pipe(&action_pos, sizeof(action_pos));
     write_to_command_pipe(&instruction_size, sizeof(instruction_size));
+
+    char instruction_bytes[MAX_INSTRUCTION_SIZE] = {0};
+    Z_READ(&instruction_bytes, instruction_size);
     write_to_command_pipe(&instruction_bytes, instruction_size);
+
+    int byte_code_len;
+    Z_READ(&byte_code_len, sizeof(byte_code_len));
+    write_to_command_pipe(&byte_code_len, sizeof(byte_code_len));
+
+    int i = 0;
+    while (i < byte_code_len) {
+      enum { ignored } byte_code;
+      Z_READ(&byte_code, sizeof(byte_code));
+      write_to_command_pipe(&byte_code, sizeof(byte_code));
+      i++;
+    }
+
   }
-  annotation_action_t no_more = NO_MORE;
+  // a value of action_pos == 0 is the in band EOF signal
+  uint8_t * no_more = NULL;
   write_to_command_pipe(&no_more, sizeof(no_more));
 }
 
