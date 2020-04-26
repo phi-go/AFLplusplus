@@ -613,6 +613,7 @@ void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_len,
         break;
       case goal_min:
         {
+          // TODO this is not thread safe
           bb_annotation_t * annotation;
           HASH_FIND_PTR(bb_annotations_map, &action->bb_annotation_id, annotation);
           NULL_CHECK(annotation);
@@ -621,13 +622,12 @@ void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_len,
           uint64_t * annotation_res = (uint64_t*)annotation->shm_addr + 1;
           uint64_t old_res = *annotation_res;
           uint64_t new_res;
-          // TODO this is not thread safe
           BC_PEEK(new_res);
-          if (!*annotation_used) {
+          if (!(*annotation_used)) {
             *annotation_used = 1;
             *annotation_res = new_res;
           } else if (new_res < old_res) {
-            printf("ann seen (%p), old: %d new %d\n", action->pos, old_res, new_res);
+            printf("ann seen AGAIN (%p), old: %d new %d\n", action->pos, old_res, new_res);
             *annotation_res = new_res;
           }
         }

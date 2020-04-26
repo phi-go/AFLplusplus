@@ -540,10 +540,13 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
   if (unlikely(fault == afl->crash_mode)) {
 
-    /* Keep only if there are new bits in the map, add to queue for
-       future fuzzing, etc. */
+    /* Keep only if there are new bits in the map or annotation is improved,
+       add to queue for future fuzzing, etc. */
+    hnb = has_new_bits(afl, afl->virgin_bits);
 
-    if (!(hnb = has_new_bits(afl, afl->virgin_bits))) {
+    int ia = improves_annotations(afl);
+      
+    if (!(hnb || ia)) {
 
       if (unlikely(afl->crash_mode)) ++afl->total_crashes;
       return 0;
@@ -564,7 +567,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
     add_to_queue(afl, queue_fn, len, 0);
 
-    if (hnb == 2) {
+    if (hnb == 2 || ia /* TODO do ia thing differently */) {
 
       afl->queue_top->has_new_cov = 1;
       ++afl->queued_with_cov;

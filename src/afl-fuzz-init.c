@@ -2261,6 +2261,8 @@ typedef struct bb_annotation {
   void * pos;
   int shm_id;
   void * shm_addr;
+  int initialized;
+  uint64_t cur_best;
 } bb_annotation_t;
 
 #define MAX_BB_SIZE 4096
@@ -2298,6 +2300,33 @@ void reset_annotations(afl_state_t * afl) {
   });
 }
 
+int improves_annotations(afl_state_t * afl) {
+  if (!get_head(&afl->bb_anotations)->next) {
+    // no annotations yet
+    return 0;
+  }
+  int improvement = 0;
+  LIST_FOREACH(&afl->bb_anotations, bb_annotation_t, {
+    uint64_t touched = *(uint64_t*)el->shm_addr;
+    uint64_t contender = *((uint64_t*)el->shm_addr+1);
+    if (touched) {
+      if (!el->initialized) {
+        el->initialized = 1;
+        el->cur_best = contender;
+        SAYF("initial ann %p, %lu\n", el->pos, el->cur_best);
+        improvement = 1;
+      } else {
+        if (contender < el->cur_best) {
+          SAYF("improve ann %p, %lu -> %lu\n", el->pos, el->cur_best, contender);
+          el->cur_best = contender;
+          improvement = 1;
+        }
+      }
+    }
+  });
+  return improvement;
+}
+
 #define MAX_INSTRUCTION_SIZE 16
 
 static void __zmq_annotation_req(afl_state_t * afl) {
@@ -2315,6 +2344,8 @@ static void __zmq_annotation_req(afl_state_t * afl) {
     PFATAL("failed to get shm addr for bb_annotation");
   }
   shmctl(bb_ann->shm_id, IPC_RMID, NULL);
+  bb_ann->initialized = 0;
+  bb_ann->cur_best = 0; // is overwritten when initialized
   list_append(&afl->bb_anotations, bb_ann);
 
   char cmd[4] = "EANR";
