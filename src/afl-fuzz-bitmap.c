@@ -419,7 +419,7 @@ u8 *describe_op(afl_state_t *afl, u8 hnb) {
 
   } else {
 
-    sprintf(ret, "src:%06u", afl->current_entry);
+    sprintf(ret, "src:%06u", afl->queue_cur->id);
 
     sprintf(ret + strlen(ret), ",time:%llu", get_cur_time() - afl->start_time);
 
@@ -540,23 +540,60 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
   if (unlikely(fault == afl->crash_mode)) {
 
-    /* Keep only if there are new bits in the map or annotation is improved,
+    int ia = 0;
+    // keep if annotations are improved
+    if (get_head(&afl->bb_anotations)->next) {
+      LIST_FOREACH(&afl->bb_anotations, bb_annotation_t, {
+        int improvement = 0;
+        uint64_t touched = *(uint64_t*)el->shm_addr;
+        uint64_t contender = *((uint64_t*)el->shm_addr+1);
+        if (touched) {
+          if (!el->initialized) {
+            el->initialized = 1;
+            el->cur_best = contender;
+            SAYF("initial ann %p, %lu\n", el->pos, el->cur_best);
+            improvement = 1;
+          } else {
+            if (contender < el->cur_best) {
+              SAYF("improve ann %p, %lu -> %lu\n", el->pos, el->cur_best, contender);
+              el->cur_best = contender;
+              improvement = 1;
+            }
+          }
+        }
+        if (improvement) {
+          ia = 1;
+          queue_fn = alloc_printf("%s/queue/id:%06u,%s,ann:%p,best:%lu", afl->out_dir,
+                                  afl->total_queued_paths, describe_op(afl, 0),
+                                  el->pos, el->cur_best);
+          fd = open(queue_fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
+          if (unlikely(fd < 0)) PFATAL("Unable to create '%s'", queue_fn);
+          ck_write(fd, mem, len, queue_fn);
+          close(fd);
+          zmq_send_file_path(afl, queue_fn, /* execs */ 1);
+          struct queue_entry * qe = add_to_queue(afl, queue_fn, len, 0);
+          qe->favored = 1;
+          ++afl->pending_favored;
+          list_append(&el->corresponding_queue_files, qe);
+        }
+      });
+    }
+
+    /* Keep if there are new bits in the map is improved,
        add to queue for future fuzzing, etc. */
     hnb = has_new_bits(afl, afl->virgin_bits);
-
-    int ia = improves_annotations(afl);
       
-    if (!(hnb || ia)) {
+    if (!(hnb)) {
 
       if (unlikely(afl->crash_mode)) ++afl->total_crashes;
-      return 0;
+      return ia;
 
     }
 
 #ifndef SIMPLE_FILES
 
     queue_fn = alloc_printf("%s/queue/id:%06u,%s", afl->out_dir,
-                            afl->queued_paths, describe_op(afl, hnb));
+                            afl->total_queued_paths, describe_op(afl, hnb));
 
 #else
 
@@ -567,7 +604,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
     add_to_queue(afl, queue_fn, len, 0);
 
-    if (hnb == 2 || ia /* TODO do ia thing differently */) {
+    if (hnb == 2) {
 
       afl->queue_top->has_new_cov = 1;
       ++afl->queued_with_cov;
@@ -588,6 +625,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     if (unlikely(fd < 0)) PFATAL("Unable to create '%s'", queue_fn);
     ck_write(fd, mem, len, queue_fn);
     close(fd);
+    zmq_send_file_path(afl, queue_fn, /* execs */ 1);
 
     keeping = 1;
 

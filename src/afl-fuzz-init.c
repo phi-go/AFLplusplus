@@ -2257,14 +2257,6 @@ struct BBReq {
 };
 
 
-typedef struct bb_annotation {
-  void * pos;
-  int shm_id;
-  void * shm_addr;
-  int initialized;
-  uint64_t cur_best;
-} bb_annotation_t;
-
 #define MAX_BB_SIZE 4096
 
 static void __zmq_bb_req(afl_state_t * afl) {
@@ -2298,33 +2290,6 @@ void reset_annotations(afl_state_t * afl) {
   LIST_FOREACH(&afl->bb_anotations, bb_annotation_t, {
     *(uint64_t*)el->shm_addr = 0;
   });
-}
-
-int improves_annotations(afl_state_t * afl) {
-  if (!get_head(&afl->bb_anotations)->next) {
-    // no annotations yet
-    return 0;
-  }
-  int improvement = 0;
-  LIST_FOREACH(&afl->bb_anotations, bb_annotation_t, {
-    uint64_t touched = *(uint64_t*)el->shm_addr;
-    uint64_t contender = *((uint64_t*)el->shm_addr+1);
-    if (touched) {
-      if (!el->initialized) {
-        el->initialized = 1;
-        el->cur_best = contender;
-        SAYF("initial ann %p, %lu\n", el->pos, el->cur_best);
-        improvement = 1;
-      } else {
-        if (contender < el->cur_best) {
-          SAYF("improve ann %p, %lu -> %lu\n", el->pos, el->cur_best, contender);
-          el->cur_best = contender;
-          improvement = 1;
-        }
-      }
-    }
-  });
-  return improvement;
 }
 
 #define MAX_INSTRUCTION_SIZE 16
@@ -2387,12 +2352,54 @@ static void __zmq_annotation_req(afl_state_t * afl) {
   write_to_command_pipe(&no_more, sizeof(no_more));
 }
 
+void remove_annotation_queue_files(afl_state_t * afl, bb_annotation_t * ann) {
+  if (get_head(&ann->corresponding_queue_files)->next) {
+    LIST_FOREACH(&ann->corresponding_queue_files, struct queue_entry, {
+      LIST_REMOVE_CURRENT_EL_IN_FOREACH();
+      remove_from_queue(afl, el);
+    });
+  }
+}
+
+void leave_best_annotation_queue_file(afl_state_t * afl, bb_annotation_t * ann) {
+  if (get_head(&ann->corresponding_queue_files)->next) {
+    struct queue_entry * keep = NULL;
+    LIST_FOREACH(&ann->corresponding_queue_files, struct queue_entry, {
+      keep = el;  // keep last
+    });
+    LIST_FOREACH(&ann->corresponding_queue_files, struct queue_entry, {
+      if (el != keep) {
+        LIST_REMOVE_CURRENT_EL_IN_FOREACH();
+        remove_from_queue(afl, el);
+      }
+    });
+  }
+}
+
+void clean_up_annotation_queue_files(afl_state_t * afl) {
+  if (get_head(&afl->bb_anotations)->next) {
+    LIST_FOREACH(&afl->bb_anotations, bb_annotation_t, {
+      leave_best_annotation_queue_file(afl, el);
+    });
+  }
+}
+
+void mark_annotated_queue_file_as_favored(afl_state_t * afl, bb_annotation_t * ann) {
+  if (get_head(&ann->corresponding_queue_files)->next) {
+    LIST_FOREACH(&ann->corresponding_queue_files, struct queue_entry, {
+      el->favored = 1;
+      ++afl->queued_favored;
+    });
+  }
+}
+
 static void __zmq_deannotation_req(afl_state_t * afl) {
   void * pos;
   Z_READ(&pos, sizeof(pos))
   LIST_FOREACH(&afl->bb_anotations, bb_annotation_t, {
     if (el->pos == pos) {
       LIST_REMOVE_CURRENT_EL_IN_FOREACH();
+      remove_annotation_queue_files(afl, el);
       shmdt(el->shm_addr);
       free(el);
       break;

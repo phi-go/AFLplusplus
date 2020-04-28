@@ -1083,6 +1083,9 @@ int main(int argc, char **argv_orig, char **envp) {
 
     u8 skipped_fuzz;
 
+    zmq_handle_commands(afl);
+    clean_up_annotation_queue_files(afl);
+
     cull_queue(afl);
 
     if (!afl->queue_cur) {
@@ -1112,7 +1115,7 @@ int main(int argc, char **argv_orig, char **envp) {
       /* If we had a full queue cycle with no new finds, try
          recombination strategies next. */
 
-      if (afl->queued_paths == prev_queued) {
+      if (afl->total_queued_paths == prev_queued) {
 
         if (afl->use_splicing)
           ++afl->cycles_wo_finds;
@@ -1123,7 +1126,7 @@ int main(int argc, char **argv_orig, char **envp) {
 
         afl->cycles_wo_finds = 0;
 
-      prev_queued = afl->queued_paths;
+      prev_queued = afl->total_queued_paths;
 
       if (afl->sync_id && afl->queue_cycle == 1 &&
           afl->afl_env.afl_import_first)

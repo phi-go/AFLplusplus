@@ -102,7 +102,7 @@ void mark_as_redundant(afl_state_t *afl, struct queue_entry *q, u8 state) {
 
 /* Append new test case to the queue. */
 
-void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det) {
+struct queue_entry * add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det) {
 
   struct queue_entry *q = ck_alloc(sizeof(struct queue_entry));
 
@@ -111,6 +111,7 @@ void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det) {
   q->depth = afl->cur_depth + 1;
   q->passed_det = passed_det;
   q->n_fuzz = 1;
+  q->id = afl->total_queued_paths;
   q->trace_mini = NULL;
 
   if (q->depth > afl->max_depth) afl->max_depth = q->depth;
@@ -118,6 +119,7 @@ void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det) {
   if (afl->queue_top) {
 
     afl->queue_top->next = q;
+    q->prev = afl->queue_top;
     afl->queue_top = q;
 
   } else
@@ -125,6 +127,7 @@ void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det) {
     afl->q_prev100 = afl->queue = afl->queue_top = q;
 
   ++afl->queued_paths;
+  ++afl->total_queued_paths;
   ++afl->pending_not_fuzzed;
 
   afl->cycles_wo_finds = 0;
@@ -150,6 +153,143 @@ void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det) {
 
   }
 
+  // check queue validity - TODO remove me
+  {
+    int cnt = 0;
+    struct queue_entry *n = afl->queue, *p = NULL;
+    while (n) {
+      cnt++;
+      if (n->prev != p) {
+        FATAL("prev %p != p %p", n->prev, p);
+      }
+      if (cnt%100) {
+        if (n->next_100 == NULL && afl->queued_paths-cnt > 100) {
+          FATAL("expected next_100 at cnt %d (total %d)", cnt, afl->queued_paths);
+        }
+      } else {
+        if (n->next_100 != NULL) {
+          FATAL("expected next_100 at NOT cnt %d (total %d)", cnt, afl->queued_paths);
+        }
+      }
+      p = n;
+      n = n->next;
+    }
+    if (p != afl->queue_top) {
+      FATAL("queue_top %p is not equal to p %p", afl->queue_top, p);
+    }
+    if (cnt != afl->queued_paths) {
+      FATAL("cnt %d != queued_paths %d", cnt, afl->queued_paths);
+    }
+  }
+
+  return q;
+}
+
+/* Remove test case from the queue. */
+
+void remove_from_queue(afl_state_t *afl, struct queue_entry * q) {
+  {
+    struct queue_entry *n = afl->q_prev100;
+    while (n) {
+      if (n == q) {
+        afl->q_prev100 = afl->q_prev100->prev;
+        break;
+      }
+      n = n->next;
+    }
+  }
+
+  int q_pos = 0;
+
+  {
+    struct queue_entry *n = afl->queue, *old = NULL, *new = NULL, *tmp = NULL;
+    while (n) {
+      if (n->next_100) old = n;
+      if (n == q) {
+        if (old && old->next_100) {
+          old->next_100 = old->next_100->next;
+        } else break;
+        while (old->next_100) {
+          new = old->next;
+          new->next_100 = old->next_100->next;
+          tmp = old->next_100;
+          old->next_100 = NULL;
+          old = tmp;
+        }
+        break;
+      }
+      n = n->next;
+      q_pos++;
+    }
+  }
+
+  if (q_pos < afl->current_entry) --afl->current_entry;
+
+  if (afl->queue_cur == q) {
+    afl->queue_cur = q->next;
+  }
+
+  if (afl->queue_top == q) {
+    afl->queue_top = q->prev;
+  }
+
+  if (afl->queue == q) {
+    afl->queue = q->next;
+  }
+
+  if(q->prev) {
+    q->prev->next = q->next;
+  }
+
+  if (q->next) {
+    q->next->prev = q->prev;
+  }
+
+  if (!q->was_fuzzed) --afl->pending_not_fuzzed;
+  if (q->favored && afl->pending_favored > 0) --afl->pending_favored; // dont go below zero
+
+  --afl->queued_paths;
+
+  for (int i = 0; i < afl->fsrv.map_size; ++i) {
+    if (afl->top_rated[i] == q) {
+      SAYF("q is top rated");
+      afl->top_rated[i] = NULL;
+    }
+  }
+
+  ck_free(q->fname);
+  ck_free(q->trace_mini);
+  ck_free(q);
+
+
+  // check queue validity - TODO remove me
+  {
+    int cnt = 0;
+    struct queue_entry *n = afl->queue, *p = NULL;
+    while (n) {
+      cnt++;
+      if (n->prev != p) {
+        FATAL("prev %p != p %p", n->prev, p);
+      }
+      if (cnt%100) {
+        if (n->next_100 == NULL && afl->queued_paths-cnt > 100) {
+          FATAL("expected next_100 at cnt %d (total %d)", cnt, afl->queued_paths);
+        }
+      } else {
+        if (n->next_100 != NULL) {
+          FATAL("expected next_100 at NOT cnt %d (total %d)", cnt, afl->queued_paths);
+        }
+      }
+      p = n;
+      n = n->next;
+    }
+    if (p != afl->queue_top) {
+      FATAL("queue_top %p is not equal to p %p", afl->queue_top, p);
+    }
+    if (cnt != afl->queued_paths) {
+      FATAL("cnt %d != queued_paths %d", cnt, afl->queued_paths);
+    }
+  }
 }
 
 /* Destroy the entire queue. */

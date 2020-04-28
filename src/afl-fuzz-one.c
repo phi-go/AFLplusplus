@@ -377,8 +377,10 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
     if (((afl->queue_cur->was_fuzzed > 0 || afl->queue_cur->fuzz_level > 0) ||
          !afl->queue_cur->favored) &&
-        rand_below(afl, 100) < SKIP_TO_NEW_PROB)
-      return 1;
+        rand_below(afl, 100) < SKIP_TO_NEW_PROB) {
+          SAYF("skipped %d %d, %d, %d\n", afl->pending_favored, afl->queue_cur->was_fuzzed, afl->queue_cur->fuzz_level, !afl->queue_cur->favored);
+          return 1;
+        }
 
   } else if (!afl->dumb_mode && !afl->queue_cur->favored &&
 
@@ -2352,7 +2354,7 @@ abandon_entry:
 
     --afl->pending_not_fuzzed;
     afl->queue_cur->was_fuzzed = 1;
-    if (afl->queue_cur->favored) --afl->pending_favored;
+    if (afl->queue_cur->favored && afl->pending_favored > 0) --afl->pending_favored; // dont go below zero
 
   }
 
@@ -2360,7 +2362,6 @@ abandon_entry:
 
   munmap(orig_in, afl->queue_cur->len);
   zmq_send_file_path(afl, afl->queue_cur->fname, afl->fsrv.total_execs - num_exec_start);
-  zmq_handle_commands(afl);
   return ret_val;
 
 #undef FLIP_BIT

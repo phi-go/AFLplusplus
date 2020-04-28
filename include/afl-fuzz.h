@@ -135,6 +135,7 @@ struct queue_entry {
 
   u32 bitmap_size,                      /* Number of bits set in bitmap     */
       fuzz_level,                       /* Number of fuzzing iterations     */
+      id,                               /* Queue entry id                   */
       exec_cksum;                       /* Checksum of the execution trace  */
 
   u64 exec_us,                          /* Execution time (us)              */
@@ -146,9 +147,19 @@ struct queue_entry {
   u32 tc_ref;                           /* Trace bytes ref count            */
 
   struct queue_entry *next,             /* Next element, if any             */
+      *prev,                            /* Previous element, if any         */
       *next_100;                        /* 100 elements ahead               */
 
 };
+
+typedef struct bb_annotation {
+  void * pos;
+  int shm_id;
+  void * shm_addr;
+  int initialized;
+  uint64_t cur_best;
+  list_t corresponding_queue_files;
+} bb_annotation_t;
 
 struct extra_data {
 
@@ -454,7 +465,8 @@ typedef struct afl_state {
   volatile u8 stop_soon,                /* Ctrl-C pressed?                  */
       clear_screen;                     /* Window resized?                  */
 
-  u32 queued_paths,                     /* Total number of queued testcases */
+  u32 queued_paths,                     /* Current number of queued testcases */
+      total_queued_paths,               /* Total number of queued testcases */
       queued_variable,                  /* Testcases with variable behavior */
       queued_at_start,                  /* Total number of initial inputs   */
       queued_discovered,                /* Items discovered during this run */
@@ -839,7 +851,8 @@ void   deinit_py(void *);
 void mark_as_det_done(afl_state_t *, struct queue_entry *);
 void mark_as_variable(afl_state_t *, struct queue_entry *);
 void mark_as_redundant(afl_state_t *, struct queue_entry *, u8);
-void add_to_queue(afl_state_t *, u8 *, u32, u8);
+struct queue_entry * add_to_queue(afl_state_t *, u8 *, u32, u8);
+void remove_from_queue(afl_state_t *, struct queue_entry *);
 void destroy_queue(afl_state_t *);
 void update_bitmap_score(afl_state_t *, struct queue_entry *);
 void cull_queue(afl_state_t *);
@@ -930,7 +943,10 @@ void   disconnect_zmq(afl_state_t *);
 void   zmq_send_file_path(afl_state_t *, char *, u64);
 void   zmq_handle_commands(afl_state_t *);
 void   reset_annotations(afl_state_t *);
-int    improves_annotations(afl_state_t * afl);
+void   remove_annotation_queue_files(afl_state_t * afl, bb_annotation_t * ann);
+void   leave_best_annotation_queue_file(afl_state_t * afl, bb_annotation_t * ann);
+void   clean_up_annotation_queue_files(afl_state_t * afl);
+void   mark_annotated_queue_file_as_favored(afl_state_t * afl, bb_annotation_t * ann);
 
 /* CmpLog */
 
