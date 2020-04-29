@@ -387,7 +387,7 @@ struct BBReq {
 // this allows the byte code to be generated as enum and as a string by the preprocessor
 #define FOREACH_ANN_BYTE_CODE(E) \
   E(imm_val) E(reg_val) E(mem_val) \
-  E(no_reg) E(rax) E(rbx) E(rdi) E(rsi) \
+  E(no_reg) E(rax) E(rbx) E(rcx) E(rdi) E(rsi) \
   E(calc_abs) E(calc_sub) \
   E(goal_min) E(max_ann_code)
 
@@ -532,6 +532,8 @@ uint64_t bc_get_reg(annotation_byte_code_t reg, ucontext_t * ctx, int allow_no_r
       return ctx->uc_mcontext.gregs[REG_RAX];
     case rbx:
       return ctx->uc_mcontext.gregs[REG_RBX];
+    case rcx:
+      return ctx->uc_mcontext.gregs[REG_RCX];
     case rdi:
       return ctx->uc_mcontext.gregs[REG_RDI];
     case rsi:
