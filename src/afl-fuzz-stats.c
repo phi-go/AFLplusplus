@@ -803,8 +803,21 @@ void show_stats(afl_state_t *afl) {
 
     SAYF("\r");
 
+  /* annotations */
+  SAYF(SET_G1 "\n" bSTG bVR bH bSTOP            cCYA
+       " annotations " bSTG bH20 bH10 bH5 bH2 bH bHT bH20 bH2 bH bRT);
+
+  if (get_head(&afl->bb_anotations)->next) {
+    LIST_FOREACH(&afl->bb_anotations, bb_annotation_t, {
+      SAYF("\n" bV bSTOP cGRA);
+      sprintf(tmp, "pos: %p cur: %lu", el->pos, el->cur_best);
+      SAYF(" %-74s ", tmp);
+      SAYF(SET_G1 bSTG bV);
+    });
+  }
+
   /* Last line */
-  SAYF(SET_G1 "\n" bSTG bLB bH30 bH20 bH2 bRB bSTOP cRST RESET_G1);
+  SAYF(SET_G1 "\n" bSTG bLB bH30 bH20 bH20 bH5 bH bRB bSTOP cRST RESET_G1 "\n");
 
 #undef IB
 
