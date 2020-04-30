@@ -962,7 +962,14 @@ static void __afl_start_forkserver(void) {
 
     if (!child_stopped) {
 
-      /* Once woken up, create a clone of our process. */
+      /* Once woken up, create a clone of our process and reset annotations. */
+
+      {
+        annotation_t * ann;
+        for (ann = annotations_map; ann != NULL; ann=ann->hh.next) {
+          *(uint64_t*)ann->shm_addr = 0;
+        }
+      }
 
       child_pid = fork();
       if (child_pid < 0) _exit(1);

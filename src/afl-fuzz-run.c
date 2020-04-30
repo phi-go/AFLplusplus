@@ -601,8 +601,6 @@ u8 common_fuzz_stuff(afl_state_t *afl, u8 *out_buf, u32 len) {
 
   }
 
-  reset_annotations(afl);
-
   write_to_testcase(afl, out_buf, len);
 
   fault = fuzz_run_target(afl, &afl->fsrv, afl->fsrv.exec_tmout);
