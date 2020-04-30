@@ -2283,40 +2283,38 @@ static void __zmq_bb_req(afl_state_t * afl) {
 }
 
 void reset_annotations(afl_state_t * afl) {
-  if (!get_head(&afl->bb_anotations)->next) {
-    // no annotations yet
-    return;
+  if (get_head(&afl->annotations)->next) {
+    LIST_FOREACH(&afl->annotations, annotation_t, {
+      *((uint64_t*)el->shm_addr) = 0;
+    });
   }
-  LIST_FOREACH(&afl->bb_anotations, bb_annotation_t, {
-    *(uint64_t*)el->shm_addr = 0;
-  });
 }
 
 #define MAX_INSTRUCTION_SIZE 16
 
 static void __zmq_annotation_req(afl_state_t * afl) {
-  bb_annotation_t * bb_ann = calloc(1, sizeof(*bb_ann));
-  if (bb_ann == NULL) {
+  annotation_t * ann = calloc(1, sizeof(*ann));
+  if (ann == NULL) {
     FATAL("failed to allocated bb_annotation %s:%d", __FILE__, __LINE__);
   }
-  Z_READ(&bb_ann->pos, sizeof(bb_ann->pos));
-  bb_ann->shm_id = shmget(IPC_PRIVATE, sysconf(_SC_PAGESIZE), IPC_CREAT | IPC_EXCL | 0600);
-  if (bb_ann->shm_id == -1) {
+  Z_READ(&ann->id, sizeof(ann->id));
+  ann->shm_id = shmget(IPC_PRIVATE, sysconf(_SC_PAGESIZE), IPC_CREAT | IPC_EXCL | 0600);
+  if (ann->shm_id == -1) {
     PFATAL("failed to get shm for bb_annotation");
   }
-  bb_ann->shm_addr = shmat(bb_ann->shm_id, NULL, 0);
-  if (bb_ann->shm_addr == (void*) -1) {
+  ann->shm_addr = shmat(ann->shm_id, NULL, 0);
+  if (ann->shm_addr == (void*) -1) {
     PFATAL("failed to get shm addr for bb_annotation");
   }
-  shmctl(bb_ann->shm_id, IPC_RMID, NULL);
-  bb_ann->initialized = 0;
-  bb_ann->cur_best = 0; // is overwritten when initialized
-  list_append(&afl->bb_anotations, bb_ann);
+  shmctl(ann->shm_id, IPC_RMID, NULL);
+  ann->initialized = 0;
+  ann->cur_best = 0; // is overwritten when initialized
+  list_append(&afl->annotations, ann);
 
   char cmd[4] = "EANR";
   write_to_command_pipe(&cmd, 4);
-  write_to_command_pipe(&bb_ann->pos, sizeof(bb_ann->pos));
-  write_to_command_pipe(&bb_ann->shm_id, sizeof(bb_ann->shm_id));
+  write_to_command_pipe(&ann->id, sizeof(ann->id));
+  write_to_command_pipe(&ann->shm_id, sizeof(ann->shm_id));
 
   while (__zmq_has_more(afl)) {
     uint8_t * action_pos;
@@ -2352,7 +2350,7 @@ static void __zmq_annotation_req(afl_state_t * afl) {
   write_to_command_pipe(&no_more, sizeof(no_more));
 }
 
-void remove_annotation_queue_files(afl_state_t * afl, bb_annotation_t * ann) {
+void remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann) {
   if (get_head(&ann->corresponding_queue_files)->next) {
     LIST_FOREACH(&ann->corresponding_queue_files, struct queue_entry, {
       LIST_REMOVE_CURRENT_EL_IN_FOREACH();
@@ -2361,7 +2359,7 @@ void remove_annotation_queue_files(afl_state_t * afl, bb_annotation_t * ann) {
   }
 }
 
-void leave_best_annotation_queue_file(afl_state_t * afl, bb_annotation_t * ann) {
+void leave_best_annotation_queue_file(afl_state_t * afl, annotation_t * ann) {
   if (get_head(&ann->corresponding_queue_files)->next) {
     struct queue_entry * keep = NULL;
     LIST_FOREACH(&ann->corresponding_queue_files, struct queue_entry, {
@@ -2377,14 +2375,14 @@ void leave_best_annotation_queue_file(afl_state_t * afl, bb_annotation_t * ann) 
 }
 
 void clean_up_annotation_queue_files(afl_state_t * afl) {
-  if (get_head(&afl->bb_anotations)->next) {
-    LIST_FOREACH(&afl->bb_anotations, bb_annotation_t, {
+  if (get_head(&afl->annotations)->next) {
+    LIST_FOREACH(&afl->annotations, annotation_t, {
       leave_best_annotation_queue_file(afl, el);
     });
   }
 }
 
-void mark_annotated_queue_file_as_favored(afl_state_t * afl, bb_annotation_t * ann) {
+void mark_annotated_queue_file_as_favored(afl_state_t * afl, annotation_t * ann) {
   if (get_head(&ann->corresponding_queue_files)->next) {
     LIST_FOREACH(&ann->corresponding_queue_files, struct queue_entry, {
       el->favored = 1;
@@ -2394,10 +2392,10 @@ void mark_annotated_queue_file_as_favored(afl_state_t * afl, bb_annotation_t * a
 }
 
 static void __zmq_deannotation_req(afl_state_t * afl) {
-  void * pos;
-  Z_READ(&pos, sizeof(pos))
-  LIST_FOREACH(&afl->bb_anotations, bb_annotation_t, {
-    if (el->pos == pos) {
+  int id;
+  Z_READ(&id, sizeof(id))
+  LIST_FOREACH(&afl->annotations, annotation_t, {
+    if (el->id == id) {
       LIST_REMOVE_CURRENT_EL_IN_FOREACH();
       remove_annotation_queue_files(afl, el);
       shmdt(el->shm_addr);
@@ -2409,7 +2407,7 @@ static void __zmq_deannotation_req(afl_state_t * afl) {
   // send command
   char cmd[4] = "DANR";
   write_to_command_pipe(&cmd, sizeof(cmd));
-  write_to_command_pipe(&pos, sizeof(pos));
+  write_to_command_pipe(&id, sizeof(id));
 }
 
 #define MSG_SIZE 4

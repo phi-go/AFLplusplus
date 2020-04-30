@@ -425,18 +425,18 @@ typedef struct action {
   char instruction_bytes[MAX_INSTRUCTION_SIZE];
   int byte_code_len;
   annotation_byte_code_t * byte_code;
-  void * bb_annotation_id;
-  struct action * bb_next;
+  int annotation_id;
+  struct action * annotation_next;
   struct action * pos_next;
 } action_t;
 
-typedef struct bb_annotation {
-  void * pos;
+typedef struct annotation {
+  int id;
   int shm_id;
   void * shm_addr;
   action_t * actions;
   UT_hash_handle hh;
-} bb_annotation_t;
+} annotation_t;
 
 typedef struct pos_actions {
   void * pos;
@@ -444,7 +444,7 @@ typedef struct pos_actions {
   UT_hash_handle hh;
 } pos_actions_t;
 
-bb_annotation_t * bb_annotations_map = NULL;
+annotation_t * annotations_map = NULL;
 pos_actions_t * pos_actions_map = NULL;
 
 __thread unsigned int single_step_size = 0;
@@ -616,8 +616,8 @@ void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_len,
       case goal_min:
         {
           // TODO this is not thread safe
-          bb_annotation_t * annotation;
-          HASH_FIND_PTR(bb_annotations_map, &action->bb_annotation_id, annotation);
+          annotation_t * annotation;
+          HASH_FIND_INT(annotations_map, &action->annotation_id, annotation);
           NULL_CHECK(annotation);
           NULL_CHECK(annotation->shm_addr);
           uint64_t * annotation_used = annotation->shm_addr;
@@ -700,20 +700,20 @@ static void __afl_handle_bb_req(void) {
     write_to_command_pipe(req.pos, req.size);
 }
 
-void remove_bb_annotation(void * bb_annotation_id) {
-  // find bb annotation
-  bb_annotation_t * annotation;
-  HASH_FIND_PTR(bb_annotations_map, &bb_annotation_id, annotation);
+void remove_annotation(int annotation_id) {
+  // find annotation
+  annotation_t * annotation;
+  HASH_FIND_INT(annotations_map, &annotation_id, annotation);
   if (annotation == NULL) {
-      fprintf(stderr, "expected annotation for %p to exist\n", bb_annotation_id);
+      fprintf(stderr, "expected annotation for %p to exist\n", annotation_id);
       _exit(1);
   }
 
-  // for all actions belonging to bb annotation find them and remove them
+  // for all actions belonging to annotation find them and remove them
   action_t * el = NULL;
   action_t * tmp = NULL;
-  LL_FOREACH_SAFE2(annotation->actions, el, tmp, bb_next) {
-    LL_DELETE2(annotation->actions, el, bb_next);
+  LL_FOREACH_SAFE2(annotation->actions, el, tmp, annotation_next) {
+    LL_DELETE2(annotation->actions, el, annotation_next);
     pos_actions_t * pos_action;
     HASH_FIND_PTR(pos_actions_map, &el->pos, pos_action);
     if (!pos_action) {
@@ -734,29 +734,29 @@ void remove_bb_annotation(void * bb_annotation_id) {
     free(el);
   }
 
-  // free bb annotation
+  // remove annotation annotation
   shmdt(annotation->shm_addr);
   annotation->shm_addr = NULL;
-  HASH_DEL(bb_annotations_map, annotation);
+  HASH_DEL(annotations_map, annotation);
   free(annotation);
 
   fprintf(stderr, "there are %d annotations, %d actions\n",
-          HASH_COUNT(bb_annotations_map), HASH_COUNT(pos_actions_map));
+          HASH_COUNT(annotations_map), HASH_COUNT(pos_actions_map));
 }
 
 static void __afl_handle_ann_req(void) {
-  // get bb_annotation
-  bb_annotation_t * bb_ann = calloc(1, sizeof(*bb_ann));
-  NULL_CHECK(bb_ann);
-  bb_ann->actions = NULL;
-  read_from_command_pipe(bb_ann->pos);
-  read_from_command_pipe(bb_ann->shm_id);
-  bb_ann->shm_addr = shmat(bb_ann->shm_id, NULL, 0);
-  if (bb_ann->shm_addr == (void *) -1) {
+  // get annotation
+  annotation_t * ann = calloc(1, sizeof(*ann));
+  NULL_CHECK(ann);
+  ann->actions = NULL;
+  read_from_command_pipe(ann->id);
+  read_from_command_pipe(ann->shm_id);
+  ann->shm_addr = shmat(ann->shm_id, NULL, 0);
+  if (ann->shm_addr == (void *) -1) {
     perror("could not get shm segment");
     _exit(1);
   }
-  HASH_ADD_PTR(bb_annotations_map, pos, bb_ann);
+  HASH_ADD_INT(annotations_map, id, ann);
 
   // get all actions for that bb_annotation
   while (1) {
@@ -779,8 +779,8 @@ static void __afl_handle_ann_req(void) {
       READ_FROM_COMMAND_PIPE2(&(action_byte_code[i++]), sizeof(*action_byte_code));
     }
     action->byte_code = action_byte_code;
-    action->bb_annotation_id = bb_ann->pos;
-    action->bb_next = NULL;
+    action->annotation_id = ann->id;
+    action->annotation_next = NULL;
     action->pos_next = NULL;
 
     // get action list for position
@@ -798,20 +798,20 @@ static void __afl_handle_ann_req(void) {
 
     // insert action struct
     LL_PREPEND2(pos_actions->actions, action, pos_next);
-    LL_PREPEND2(bb_ann->actions, action, bb_next);
+    LL_PREPEND2(ann->actions, action, annotation_next);
 
     // set breakpoint to enable action
     set_breakpoint(action, /*quiet*/ 1);
   }
 
   fprintf(stderr, "there are %d annotations, %d actions\n",
-          HASH_COUNT(bb_annotations_map), HASH_COUNT(pos_actions_map));
+          HASH_COUNT(annotations_map), HASH_COUNT(pos_actions_map));
 }
 
 static void __afl_handle_deann_req(void) {
-  void * pos = 0;
-  read_from_command_pipe(pos);
-  remove_bb_annotation(pos);
+  int id = 0;
+  read_from_command_pipe(id);
+  remove_annotation(id);
   // TODO return command success?
 }
 

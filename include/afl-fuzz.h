@@ -152,14 +152,14 @@ struct queue_entry {
 
 };
 
-typedef struct bb_annotation {
-  void * pos;
+typedef struct annotation {
+  int id;
   int shm_id;
   void * shm_addr;
   int initialized;
   uint64_t cur_best;
   list_t corresponding_queue_files;
-} bb_annotation_t;
+} annotation_t;
 
 struct extra_data {
 
@@ -585,7 +585,7 @@ typedef struct afl_state {
   void *zmq_context;
   void *zmq_socket;
 
-  list_t bb_anotations;
+  list_t annotations;
 
 #ifdef _AFL_DOCUMENT_MUTATIONS
   u8  do_document;
@@ -943,10 +943,10 @@ void   disconnect_zmq(afl_state_t *);
 void   zmq_send_file_path(afl_state_t *, char *, u64);
 void   zmq_handle_commands(afl_state_t *);
 void   reset_annotations(afl_state_t *);
-void   remove_annotation_queue_files(afl_state_t * afl, bb_annotation_t * ann);
-void   leave_best_annotation_queue_file(afl_state_t * afl, bb_annotation_t * ann);
+void   remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann);
+void   leave_best_annotation_queue_file(afl_state_t * afl, annotation_t * ann);
 void   clean_up_annotation_queue_files(afl_state_t * afl);
-void   mark_annotated_queue_file_as_favored(afl_state_t * afl, bb_annotation_t * ann);
+void   mark_annotated_queue_file_as_favored(afl_state_t * afl, annotation_t * ann);
 
 /* CmpLog */
 

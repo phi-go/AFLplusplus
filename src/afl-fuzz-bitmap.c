@@ -542,8 +542,8 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
     int ia = 0;
     // keep if annotations are improved
-    if (get_head(&afl->bb_anotations)->next) {
-      LIST_FOREACH(&afl->bb_anotations, bb_annotation_t, {
+    if (get_head(&afl->annotations)->next) {
+      LIST_FOREACH(&afl->annotations, annotation_t, {
         int improvement = 0;
         uint64_t touched = *(uint64_t*)el->shm_addr;
         uint64_t contender = *((uint64_t*)el->shm_addr+1);
@@ -551,11 +551,9 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
           if (!el->initialized) {
             el->initialized = 1;
             el->cur_best = contender;
-            SAYF("initial ann %p, %lu\n", el->pos, el->cur_best);
             improvement = 1;
           } else {
             if (contender < el->cur_best) {
-              SAYF("improve ann %p, %lu -> %lu\n", el->pos, el->cur_best, contender);
               el->cur_best = contender;
               improvement = 1;
             }
@@ -563,9 +561,9 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
         }
         if (improvement) {
           ia = 1;
-          queue_fn = alloc_printf("%s/queue/id:%06u,%s,ann:%p,best:%lu", afl->out_dir,
+          queue_fn = alloc_printf("%s/queue/id:%06u,%s,ann:%d,best:%lu", afl->out_dir,
                                   afl->total_queued_paths, describe_op(afl, 0),
-                                  el->pos, el->cur_best);
+                                  el->id, el->cur_best);
           fd = open(queue_fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
           if (unlikely(fd < 0)) PFATAL("Unable to create '%s'", queue_fn);
           ck_write(fd, mem, len, queue_fn);
