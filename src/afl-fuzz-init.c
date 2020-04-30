@@ -2251,6 +2251,14 @@ void zmq_send_file_path(afl_state_t * afl, char * file_path, u64 execs) {
   }
 }
 
+void   zmq_send_annotation_update(afl_state_t * afl, int annotation_id, u64 new_best) {
+  if (afl->zmq_socket) {
+    z_send("F_AU", 4, ZMQ_SNDMORE);
+    z_send(&annotation_id, sizeof(annotation_id), ZMQ_SNDMORE);
+    z_send(&new_best, sizeof(new_best), 0);
+  }
+}
+
 struct BBReq {
   intptr_t pos;
   int size;

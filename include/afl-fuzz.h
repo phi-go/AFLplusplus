@@ -941,6 +941,7 @@ void   save_cmdline(afl_state_t *, u32, char **);
 void   connect_zmq(afl_state_t *);
 void   disconnect_zmq(afl_state_t *);
 void   zmq_send_file_path(afl_state_t *, char *, u64);
+void   zmq_send_annotation_update(afl_state_t *, int, u64);
 void   zmq_handle_commands(afl_state_t *);
 void   reset_annotations(afl_state_t *);
 void   remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann);

@@ -561,6 +561,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
         }
         if (improvement) {
           ia = 1;
+          zmq_send_annotation_update(afl, el->id, el->cur_best);
           queue_fn = alloc_printf("%s/queue/id:%06u,%s,ann:%d,best:%lu", afl->out_dir,
                                   afl->total_queued_paths, describe_op(afl, 0),
                                   el->id, el->cur_best);
