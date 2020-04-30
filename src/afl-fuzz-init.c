@@ -416,7 +416,7 @@ void read_testcases(afl_state_t *afl) {
 
     if (!access(dfn, F_OK)) passed_det = 1;
 
-    add_to_queue(afl, fn2, st.st_size, passed_det);
+    add_to_queue(afl, fn2, st.st_size, passed_det, 0);
 
   }
 

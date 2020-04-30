@@ -570,7 +570,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
           ck_write(fd, mem, len, queue_fn);
           close(fd);
           zmq_send_file_path(afl, queue_fn, /* execs */ 1);
-          struct queue_entry * qe = add_to_queue(afl, queue_fn, len, 0);
+          struct queue_entry * qe = add_to_queue(afl, queue_fn, len, 0, /* do not update level */ 1);
           qe->favored = 1;
           ++afl->pending_favored;
           list_append(&el->corresponding_queue_files, qe);
@@ -601,7 +601,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
 #endif                                                    /* ^!SIMPLE_FILES */
 
-    add_to_queue(afl, queue_fn, len, 0);
+    add_to_queue(afl, queue_fn, len, 0, 0);
 
     if (hnb == 2) {
 

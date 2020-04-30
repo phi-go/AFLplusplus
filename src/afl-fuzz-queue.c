@@ -102,13 +102,15 @@ void mark_as_redundant(afl_state_t *afl, struct queue_entry *q, u8 state) {
 
 /* Append new test case to the queue. */
 
-struct queue_entry * add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det) {
+struct queue_entry * add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det, int_fast8_t ignore_depth) {
 
   struct queue_entry *q = ck_alloc(sizeof(struct queue_entry));
 
   q->fname = fname;
   q->len = len;
-  q->depth = afl->cur_depth + 1;
+  if(!ignore_depth) {
+    q->depth = afl->cur_depth + 1;
+  }
   q->passed_det = passed_det;
   q->n_fuzz = 1;
   q->id = afl->total_queued_paths;
