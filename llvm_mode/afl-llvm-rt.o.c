@@ -406,7 +406,7 @@ static const char * bc_str(annotation_byte_code_t bc) {
   return annotation_byte_code_strings[bc];
 }
 
-annotation_byte_code_t bc_check_valid(annotation_byte_code_t bc) {
+static annotation_byte_code_t bc_check_valid(annotation_byte_code_t bc) {
   if (bc >= max_ann_code || bc < 0) {
       fprintf(stderr, "invalid byte code value %d\n", bc);
       _exit(1);
@@ -444,12 +444,12 @@ typedef struct pos_actions {
   UT_hash_handle hh;
 } pos_actions_t;
 
-annotation_t * annotations_map = NULL;
-pos_actions_t * pos_actions_map = NULL;
+static annotation_t * annotations_map = NULL;
+static pos_actions_t * pos_actions_map = NULL;
 
-__thread unsigned int single_step_size = 0;
+static __thread unsigned int single_step_size = 0;
 
-void set_breakpoint(action_t * action, int quiet) {
+static void set_breakpoint(action_t * action, int quiet) {
   if (!(*action->pos == 0xCC || *action->pos == (uint8_t)action->instruction_bytes[0])) {
       fprintf(stderr, "ann req pos (%p) is not 0xCC or expected initial 0x%x but 0x%x\n",
       action->pos, (uint8_t)action->instruction_bytes[0], *action->pos);
@@ -466,7 +466,7 @@ void set_breakpoint(action_t * action, int quiet) {
   assert(mprotect((void*)base, 4096 , PROT_READ|PROT_EXEC )==0);
 }
 
-void remove_breakpoint(action_t * action, int quiet) {
+static void remove_breakpoint(action_t * action, int quiet) {
   if (*action->pos != 0xcc) {
       fprintf(stderr, "deann req pos (%lx) is not 0xcc but 0x%x\n", action->pos, *action->pos);
       _exit(1);
@@ -518,7 +518,7 @@ void remove_breakpoint(action_t * action, int quiet) {
   fprintf(stderr, "=========\n");
 
 
-uint64_t bc_get_reg(annotation_byte_code_t reg, ucontext_t * ctx, int allow_no_reg,
+static uint64_t bc_get_reg(annotation_byte_code_t reg, ucontext_t * ctx, int allow_no_reg,
                     int verbose) {
   if (verbose) { fprintf(stderr, "register: %s(%d)\n", bc_str(reg), reg); }
   switch(reg) {
@@ -544,7 +544,7 @@ uint64_t bc_get_reg(annotation_byte_code_t reg, ucontext_t * ctx, int allow_no_r
   }
 }
   
-uint64_t bc_get_mem(annotation_byte_code_t segment_reg,
+static uint64_t bc_get_mem(annotation_byte_code_t segment_reg,
                     annotation_byte_code_t base_reg,
                     uint64_t index,
                     uint64_t scale,
@@ -569,7 +569,7 @@ uint64_t bc_get_mem(annotation_byte_code_t segment_reg,
   return *(uint64_t*)addr;
 }
 
-void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_len,
+static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_len,
                      ucontext_t * ctx, action_t * action, int verbose) {
   int i = 0;
   uint64_t stack[BC_MAX_STACK];
@@ -641,7 +641,7 @@ void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_len,
   }
 }
 
-void sigtrap_handler(int signo, siginfo_t *si, void* arg)
+static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
 {
   assert(signo == SIGTRAP);
   ucontext_t *ctx = (ucontext_t *)arg;
@@ -694,13 +694,13 @@ void sigtrap_handler(int signo, siginfo_t *si, void* arg)
   }
 }
 
-static void __afl_handle_bb_req(void) {
+static void handle_bb_req(void) {
     struct BBReq req;
     read_from_command_pipe(req);
     write_to_command_pipe(req.pos, req.size);
 }
 
-void remove_annotation(int annotation_id) {
+static void remove_annotation(int annotation_id) {
   // find annotation
   annotation_t * annotation;
   HASH_FIND_INT(annotations_map, &annotation_id, annotation);
@@ -744,7 +744,7 @@ void remove_annotation(int annotation_id) {
           HASH_COUNT(annotations_map), HASH_COUNT(pos_actions_map));
 }
 
-static void __afl_handle_ann_req(void) {
+static void handle_ann_req(void) {
   // get annotation
   annotation_t * ann = calloc(1, sizeof(*ann));
   NULL_CHECK(ann);
@@ -808,7 +808,7 @@ static void __afl_handle_ann_req(void) {
           HASH_COUNT(annotations_map), HASH_COUNT(pos_actions_map));
 }
 
-static void __afl_handle_deann_req(void) {
+static void handle_deann_req(void) {
   int id = 0;
   read_from_command_pipe(id);
   remove_annotation(id);
@@ -928,11 +928,11 @@ static void __afl_start_forkserver(void) {
       //   _exit(1);
       // }
       if (strncmp("BB_R", cmd, 4) == 0) {
-        __afl_handle_bb_req();
+        handle_bb_req();
       } else if (strncmp("EANR", cmd, 4) == 0) {
-        __afl_handle_ann_req();
+        handle_ann_req();
       } else if (strncmp("DANR", cmd, 4) == 0) {
-        __afl_handle_deann_req();
+        handle_deann_req();
       } else {
         fprintf(stderr, "fuzzee unknown command: %s\n", cmd);
       }
