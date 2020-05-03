@@ -355,27 +355,40 @@ static void __afl_start_snapshots(void) {
 
 #endif
 
+FILE * put_err_log_fp = NULL;
+
+#define FPRINTF_TO_ERR_FILE(...) \
+  do { \
+    if (put_err_log_fp != NULL) { \
+      fprintf(put_err_log_fp, __VA_ARGS__); \
+      fflush(put_err_log_fp); \
+    } else { \
+      fprintf(stderr, __VA_ARGS__); \
+      fflush(stderr); \
+    } \
+  } while(0)
+
 #define read_from_command_pipe(V) \
     if ((read(FORKSRV_FD + 2, &V, sizeof(V)) != sizeof(V))) { \
-      fprintf(stderr, "command read failed %s:%d\n", __FILE__, __LINE__); \
+      FPRINTF_TO_ERR_FILE("command read failed %s:%d\n", __FILE__, __LINE__); \
       _exit(1); \
     }
 
 #define READ_FROM_COMMAND_PIPE2(V, S) \
     if ((read(FORKSRV_FD + 2, V, S) != S)) { \
-      fprintf(stderr, "command read failed %s:%d\n", __FILE__, __LINE__); \
+      FPRINTF_TO_ERR_FILE("command read failed %s:%d\n", __FILE__, __LINE__); \
       _exit(1); \
     }
 
 #define write_to_command_pipe(V, S) \
     if ((write(FORKSRV_FD + 3, V, S) != S)) { \
-      fprintf(stderr, "command write failed %s:%d\n", __FILE__, __LINE__); \
+      FPRINTF_TO_ERR_FILE("command write failed %s:%d\n", __FILE__, __LINE__); \
       _exit(1); \
     }
 
 #define NULL_CHECK(P) \
   if (P == NULL) { \
-      fprintf(stderr, "ptr should not be null %s:%d\n", __FILE__, __LINE__); \
+      FPRINTF_TO_ERR_FILE("ptr should not be null %s:%d\n", __FILE__, __LINE__); \
       _exit(1); \
   }
 
@@ -384,31 +397,84 @@ struct BBReq {
   int size;
 };
 
+// https://en.wikipedia.org/wiki/X_Macro
 // this allows the byte code to be generated as enum and as a string by the preprocessor
-#define FOREACH_ANN_BYTE_CODE(E) \
-  E(imm_val) E(reg_val) E(mem_val) \
-  E(no_reg) E(rax) E(rbx) E(rcx) E(rdi) E(rsi) \
-  E(calc_abs) E(calc_sub) \
-  E(goal_min) E(max_ann_code)
+#define ANN_BYTE_CODE(X) \
+  \
+  X(START_VAL) \
+  X(VAL_IMM) X(VAL_REG) X(VAL_MEM) \
+  X(END_VAL) \
+  \
+  X(START_REG) \
+  X(NO_REG) \
+  X(AH) X(AL) X(AX) X(BH) X(BL) X(BP) X(BPL) X(BX) X(CH) X(CL) X(CS) X(CX) X(DH) X(DI) X(DIL) \
+  X(DL) X(DS) X(DX) X(EAX) X(EBP) X(EBX) X(ECX) X(EDI) X(EDX) X(EFLAGS) \
+  X(EIP) X(EIZ) X(ES) X(ESI) X(ESP) X(FPSW) X(FS) X(GS) X(IP) X(RAX) X(RBP) X(RBX) X(RCX) X(RDI) \
+  X(RDX) X(RIP) X(RIZ) X(RSI) X(RSP) X(SI) X(SIL) X(SP) X(SPL) X(SS) \
+  X(CR0) X(CR1) X(CR2) X(CR3) X(CR4) X(CR5) X(CR6) X(CR7) X(CR8) X(CR9) X(CR10) X(CR11) X(CR12) \
+  X(CR13) X(CR14) X(CR15) \
+  X(DR0) X(DR1) X(DR2) X(DR3) X(DR4) X(DR5) X(DR6) X(DR7) X(DR8) X(DR9) X(DR10) X(DR11) X(DR12) \
+  X(DR13) X(DR14) X(DR15) \
+  X(FP0) X(FP1) X(FP2) X(FP3) X(FP4) X(FP5) X(FP6) X(FP7) \
+  X(K0) X(K1) X(K2) X(K3) X(K4) X(K5) X(K6) X(K7) \
+  X(MM0) X(MM1) X(MM2) X(MM3) X(MM4) X(MM5) X(MM6) X(MM7) \
+  X(R8) X(R9) X(R10) X(R11) X(R12) X(R13) X(R14) X(R15) \
+  X(ST0) X(ST1) X(ST2) X(ST3) X(ST4) X(ST5) X(ST6) X(ST7) \
+  X(XMM0) X(XMM1) X(XMM2) X(XMM3) X(XMM4) X(XMM5) X(XMM6) X(XMM7) X(XMM8) X(XMM9) X(XMM10) X(XMM11) \
+  X(XMM12) X(XMM13) X(XMM14) X(XMM15) X(XMM16) \
+  X(XMM17) X(XMM18) X(XMM19) X(XMM20) X(XMM21) X(XMM22) X(XMM23) X(XMM24) X(XMM25) X(XMM26) X(XMM27) \
+  X(XMM28) X(XMM29) X(XMM30) X(XMM31) \
+  X(YMM0) X(YMM1) X(YMM2) X(YMM3) X(YMM4) X(YMM5) X(YMM6) X(YMM7) X(YMM8) X(YMM9) X(YMM10) X(YMM11) \
+  X(YMM12) X(YMM13) X(YMM14) X(YMM15) X(YMM16) \
+  X(YMM17) X(YMM18) X(YMM19) X(YMM20) X(YMM21) X(YMM22) X(YMM23) X(YMM24) X(YMM25) X(YMM26) X(YMM27) \
+  X(YMM28) X(YMM29) X(YMM30) X(YMM31) \
+  X(ZMM0) X(ZMM1) X(ZMM2) X(ZMM3) X(ZMM4) X(ZMM5) X(ZMM6) X(ZMM7) X(ZMM8) X(ZMM9) X(ZMM10) X(ZMM11) \
+  X(ZMM12) X(ZMM13) X(ZMM14) X(ZMM15) X(ZMM16) \
+  X(ZMM17) X(ZMM18) X(ZMM19) X(ZMM20) X(ZMM21) X(ZMM22) X(ZMM23) X(ZMM24) X(ZMM25) X(ZMM26) X(ZMM27) \
+  X(ZMM28) X(ZMM29) X(ZMM30) X(ZMM31) \
+  X(R8B) X(R9B) X(R10B) X(R11B) X(R12B) X(R13B) X(R14B) X(R15B) X(R8D) X(R9D) X(R10D) X(R11D) X(R12D) \
+  X(R13D) X(R14D) X(R15D) X(R8W) X(R9W) X(R10W) X(R11W) X(R12W) X(R13W) X(R14W) X(R15W) \
+  X(END_REG) \
+  \
+  X(START_FUNC) \
+  X(CALC_ABS) X(CALC_SUB) \
+  X(END_FUNC) \
+  \
+  X(START_GOAL) \
+  X(GOAL_MIN) \
+  X(END_GOAL) \
+  \
+  X(MAX_BYTE_CODE)
 
-#define E_AS_ENUM(ENUM) ENUM,
-#define E_AS_STRING(STRING) #STRING,
+#define X_AS_ENUM(ENUM) ENUM,
+#define X_AS_STRING(STRING) #STRING,
 
 typedef enum {
-  FOREACH_ANN_BYTE_CODE(E_AS_ENUM)
+  ANN_BYTE_CODE(X_AS_ENUM)
 } annotation_byte_code_t;
 
 static const char *annotation_byte_code_strings[] = {
-  FOREACH_ANN_BYTE_CODE(E_AS_STRING)
+  ANN_BYTE_CODE(X_AS_STRING)
 };
 
 static const char * bc_str(annotation_byte_code_t bc) {
   return annotation_byte_code_strings[bc];
 }
 
+static annotation_byte_code_t bc_check_valid_top_level(annotation_byte_code_t bc, int verbose) {
+  if (!(   (START_VAL < bc && bc < END_VAL)
+        || (START_FUNC < bc && bc < END_FUNC)
+        || (START_GOAL < bc && bc < END_GOAL))) {
+        FPRINTF_TO_ERR_FILE("invalid top level byte code value %d %s\n", bc, bc_str(bc));
+        _exit(1);
+      }
+  if (verbose) FPRINTF_TO_ERR_FILE("top level: %s", bc_str(bc));
+  return bc;
+}
+
 static annotation_byte_code_t bc_check_valid(annotation_byte_code_t bc) {
-  if (bc >= max_ann_code || bc < 0) {
-      fprintf(stderr, "invalid byte code value %d\n", bc);
+  if (bc >= MAX_BYTE_CODE || bc < 0) {
+      FPRINTF_TO_ERR_FILE("invalid byte code value %d\n", bc);
       _exit(1);
   }
   return bc;
@@ -451,12 +517,12 @@ static __thread unsigned int single_step_size = 0;
 
 static void set_breakpoint(action_t * action, int quiet) {
   if (!(*action->pos == 0xCC || *action->pos == (uint8_t)action->instruction_bytes[0])) {
-      fprintf(stderr, "ann req pos (%p) is not 0xCC or expected initial 0x%x but 0x%x\n",
+      FPRINTF_TO_ERR_FILE("ann req pos (%p) is not 0xCC or expected initial 0x%x but 0x%x\n",
       action->pos, (uint8_t)action->instruction_bytes[0], *action->pos);
       _exit(1);
   }
   if (!quiet) {
-    fprintf(stderr, "setting breakpoint at %p\n", action->pos);
+    FPRINTF_TO_ERR_FILE("setting breakpoint at %p\n", action->pos);
   }
 
   uint8_t* base = action->pos - ((uint64_t)action->pos)%4096;
@@ -468,11 +534,11 @@ static void set_breakpoint(action_t * action, int quiet) {
 
 static void remove_breakpoint(action_t * action, int quiet) {
   if (*action->pos != 0xcc) {
-      fprintf(stderr, "deann req pos (%lx) is not 0xcc but 0x%x\n", action->pos, *action->pos);
+      FPRINTF_TO_ERR_FILE("deann req pos (%lx) is not 0xcc but 0x%x\n", action->pos, *action->pos);
       _exit(1);
   }
   if (!quiet) {
-    fprintf(stderr, "removing breakpoint at %p\n", action->pos);
+    FPRINTF_TO_ERR_FILE("removing breakpoint at %p\n", action->pos);
   }
 
   uint8_t* base = action->pos - ((uint64_t)action->pos)%4096;
@@ -484,11 +550,46 @@ static void remove_breakpoint(action_t * action, int quiet) {
 
 #define CHECK_BIT(var,pos) (!!((var) & (pos)))
 
+#define REGISTER_LOWER(val) (val & 0xFF)
+#define REGISTER_HIGHER(val) (val & 0xFF00)
+#define REGISTER_16BIT(val) (val & 0xFFFF)
+#define REGISTER_EXTENDED(val) (val & 0xFFFFFFFF)
+
+#define CLASSIC_REGISTER_CASES(NAME) \
+  case R##NAME##X: \
+    return ctx->uc_mcontext.gregs[REG_R##NAME##X]; \
+  case E##NAME##X: \
+    return REGISTER_EXTENDED(ctx->uc_mcontext.gregs[REG_R##NAME##X]); \
+  case NAME##H: \
+    return REGISTER_HIGHER(ctx->uc_mcontext.gregs[REG_R##NAME##X]); \
+  case NAME##L: \
+    return REGISTER_LOWER(ctx->uc_mcontext.gregs[REG_R##NAME##X]);
+
+#define SOURCE_DEST_REGISTER_CASES(NAME) \
+  case R##NAME##I: \
+    return ctx->uc_mcontext.gregs[REG_R##NAME##I]; \
+  case E##NAME##I: \
+    return REGISTER_EXTENDED(ctx->uc_mcontext.gregs[REG_R##NAME##I]); \
+  case NAME##I: \
+    return REGISTER_HIGHER(ctx->uc_mcontext.gregs[REG_R##NAME##I]); \
+  case NAME##IL: \
+    return REGISTER_LOWER(ctx->uc_mcontext.gregs[REG_R##NAME##I]);
+
+#define NEW_REGISTER_CASES(NAME) \
+  case R##NAME: \
+    return ctx->uc_mcontext.gregs[REG_R##NAME]; \
+  case R##NAME##D: \
+    return REGISTER_EXTENDED(ctx->uc_mcontext.gregs[REG_R##NAME]); \
+  case R##NAME##W: \
+    return REGISTER_16BIT(ctx->uc_mcontext.gregs[REG_R##NAME]); \
+  case R##NAME##B: \
+    return REGISTER_LOWER(ctx->uc_mcontext.gregs[REG_R##NAME]);
+
 #define BC_MAX_STACK 64
 
 #define BC_PUSH(V) \
   if (stack_ptr >= stack + 64) { \
-      fprintf(stderr, "bc stack overflow"); \
+      FPRINTF_TO_ERR_FILE("bc stack overflow"); \
       _exit(1); \
   } \
   *stack_ptr = V; \
@@ -497,49 +598,58 @@ static void remove_breakpoint(action_t * action, int quiet) {
 #define BC_POP(V) \
   stack_ptr -= 1; \
   if (stack_ptr < stack) { \
-    fprintf(stderr, "bc stack underflow"); \
+    FPRINTF_TO_ERR_FILE("bc stack underflow"); \
     _exit(1); \
   } \
   V = *stack_ptr;
 
 #define BC_PEEK(V) \
   if (stack_ptr-1 < stack) { \
-    fprintf(stderr, "bc stack underflow"); \
+    FPRINTF_TO_ERR_FILE("bc stack underflow"); \
     _exit(1); \
   } \
   V = *(stack_ptr-1);
 
 #define BC_PRINT_STACK() \
   uint64_t * p = stack_ptr; \
-  fprintf(stderr, "^^^^^^^^^\n");  \
+  FPRINTF_TO_ERR_FILE("^^^^^^^^^\n");  \
   while (--p >= stack) { \
-    fprintf(stderr, "%p\t0x%x | %d\n", p, *p, *p);  \
+    FPRINTF_TO_ERR_FILE("%p\t0x%x | %d\n", p, *p, *p);  \
   } \
-  fprintf(stderr, "=========\n");
+  FPRINTF_TO_ERR_FILE("=========\n");
 
 
 static uint64_t bc_get_reg(annotation_byte_code_t reg, ucontext_t * ctx, int allow_no_reg,
                     int verbose) {
-  if (verbose) { fprintf(stderr, "register: %s(%d)\n", bc_str(reg), reg); }
+  if (verbose) { FPRINTF_TO_ERR_FILE("register: %s(%d)\n", bc_str(reg), reg); }
   switch(reg) {
-    case no_reg:
+    case NO_REG:
       if (allow_no_reg) {
         return 0;
       }
-      fprintf(stderr, "no_reg is not allowed: %s(%d) ", bc_str(reg), reg);
+      FPRINTF_TO_ERR_FILE("no_reg is not allowed: %s(%d) ", bc_str(reg), reg);
       _exit(1);
-    case rax:
-      return ctx->uc_mcontext.gregs[REG_RAX];
-    case rbx:
-      return ctx->uc_mcontext.gregs[REG_RBX];
-    case rcx:
-      return ctx->uc_mcontext.gregs[REG_RCX];
-    case rdi:
-      return ctx->uc_mcontext.gregs[REG_RDI];
-    case rsi:
-      return ctx->uc_mcontext.gregs[REG_RSI];
+    // I'm sorry ... (using macros should hopefully reduce the chance for typos)
+    CLASSIC_REGISTER_CASES(A);
+    CLASSIC_REGISTER_CASES(B);
+    CLASSIC_REGISTER_CASES(C);
+    CLASSIC_REGISTER_CASES(D);
+    SOURCE_DEST_REGISTER_CASES(S);
+    SOURCE_DEST_REGISTER_CASES(D);
+    NEW_REGISTER_CASES(8);
+    NEW_REGISTER_CASES(9);
+    NEW_REGISTER_CASES(10);
+    NEW_REGISTER_CASES(11);
+    NEW_REGISTER_CASES(12);
+    NEW_REGISTER_CASES(13);
+    NEW_REGISTER_CASES(14);
+    NEW_REGISTER_CASES(15);
+    case RBP:
+      return ctx->uc_mcontext.gregs[REG_RBP];
+    case EBP:
+      return REGISTER_EXTENDED(ctx->uc_mcontext.gregs[REG_RBP]);
     default:
-      fprintf(stderr, "unhandled reg: %s(%d) ", bc_str(reg), reg);
+      FPRINTF_TO_ERR_FILE("unhandled reg: %s(%d) ", bc_str(reg), reg);
       _exit(1);
   }
 }
@@ -555,7 +665,7 @@ static uint64_t bc_get_mem(annotation_byte_code_t segment_reg,
   uint64_t segment = bc_get_reg(segment_reg, ctx, /* allow no_reg */ 1, verbose);
   uint64_t base = bc_get_reg(base_reg, ctx, /* allow no_reg */ 1, verbose);
   uint64_t addr = segment + base + index*scale + displacement;
-  if (verbose) { fprintf(stderr, "addr: %p (size)\n", addr, size); }
+  if (verbose) { FPRINTF_TO_ERR_FILE("addr: %p (size)\n", addr, size); }
   switch(size) {
     case 8:
       return *(uint64_t*)addr;
@@ -574,18 +684,18 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
   int i = 0;
   uint64_t stack[BC_MAX_STACK];
   uint64_t * stack_ptr = stack;
-  if (verbose) { fprintf(stderr, "exec(%d): \n", byte_code_len); }
+  if (verbose) { FPRINTF_TO_ERR_FILE("exec(%d): \n", byte_code_len); }
   while (i < byte_code_len) {
-    if (verbose) { fprintf(stderr, "inst: %s(%d)\n", bc_str(byte_code[i]), byte_code[i]); }
-    switch(bc_check_valid(byte_code[i++])) {
-      case imm_val:
-        if (verbose) { fprintf(stderr, "imm: %x | %d\n", byte_code[i], byte_code[i]); };
+    if (verbose) { FPRINTF_TO_ERR_FILE("inst: %s(%d)\n", bc_str(byte_code[i]), byte_code[i]); }
+    switch(bc_check_valid_top_level(byte_code[i++], verbose)) {
+      case VAL_IMM:
+        if (verbose) { FPRINTF_TO_ERR_FILE("imm: %x | %d\n", byte_code[i], byte_code[i]); };
         BC_PUSH(byte_code[i++]);
         break;
-      case reg_val:
+      case VAL_REG:
         BC_PUSH(bc_get_reg(bc_check_valid(byte_code[i++]), ctx, /* allow no_reg */ 0, verbose));
         break;
-      case mem_val:
+      case VAL_MEM:
         {
           annotation_byte_code_t segment_reg = byte_code[i++];
           annotation_byte_code_t base_reg = byte_code[i++];
@@ -597,7 +707,7 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
                              ctx, verbose));
         }
         break;
-      case calc_sub:
+      case CALC_SUB:
         {
           uint64_t a, b;
           BC_POP(a);
@@ -605,7 +715,7 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
           BC_PUSH(a - b);
         }
         break;
-      case calc_abs:
+      case CALC_ABS:
         {
           int64_t val;
           BC_POP(val);
@@ -613,7 +723,7 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
           BC_PUSH(val);
         }
         break;
-      case goal_min:
+      case GOAL_MIN:
         {
           // TODO this is not thread safe
           annotation_t * annotation;
@@ -635,7 +745,7 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
         }
         break;
       default:
-        fprintf(stderr, "unhandled bc: %s(%d) \n", bc_str(byte_code[i-1]), byte_code[i-1]);
+        FPRINTF_TO_ERR_FILE("unhandled bc: %s(%d) \n", bc_str(byte_code[i-1]), byte_code[i-1]);
     }
     if (verbose) { BC_PRINT_STACK(); }
   }
@@ -643,6 +753,7 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
 
 static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
 {
+  // FPRINTF_TO_ERR_FILE("oh boy\n");
   assert(signo == SIGTRAP);
   ucontext_t *ctx = (ucontext_t *)arg;
   if (single_step_size == 0) {
@@ -668,7 +779,7 @@ static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
 
       remove_breakpoint(act, /*quiet*/ 1);
     } else {
-      fprintf(stderr, "no actions for %p found (before stepping)\n", pos);
+      FPRINTF_TO_ERR_FILE("no actions for %p found (before stepping)\n", pos);
     }
     return;
   } else {
@@ -683,7 +794,7 @@ static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
         exec_annotation(act->byte_code, act->byte_code_len, ctx, act, verbose);
       }
     } else {
-      fprintf(stderr, "no actions for %p found (after stepping %d - real pos %p)\n",
+      FPRINTF_TO_ERR_FILE("no actions for %p found (after stepping %d - real pos %p)\n",
               pos, single_step_size, (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP]);
     }
 
@@ -694,18 +805,37 @@ static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
   }
 }
 
-static void handle_bb_req(void) {
+static void print_annotations() {
+  annotation_t * an;
+  action_t * ac;
+  char msg [1024];
+  char *cur = msg, * const end = msg + sizeof msg;
+  cur += snprintf(cur, end-cur, "there are %d annotations, %d actions: ",
+          HASH_COUNT(annotations_map), HASH_COUNT(pos_actions_map));
+  for (an=annotations_map; an != NULL; an=an->hh.next) {
+    cur += snprintf(cur, end-cur, "\n\t%d (", an->id);
+    LL_FOREACH2(an->actions, ac, annotation_next) {
+      cur += snprintf(cur, end-cur, "%p, ", ac->pos);
+    }
+    cur += snprintf(cur, end-cur, ") ");
+  }
+  *cur = '\0';
+  FPRINTF_TO_ERR_FILE("%s\n", msg);
+}
+
+static void handle_bb_req() {
     struct BBReq req;
     read_from_command_pipe(req);
     write_to_command_pipe(req.pos, req.size);
 }
 
 static void remove_annotation(int annotation_id) {
+  FPRINTF_TO_ERR_FILE("remove ann: %d\n", annotation_id);
   // find annotation
   annotation_t * annotation;
   HASH_FIND_INT(annotations_map, &annotation_id, annotation);
   if (annotation == NULL) {
-      fprintf(stderr, "expected annotation for %p to exist\n", annotation_id);
+      FPRINTF_TO_ERR_FILE("expected annotation for %p to exist\n", annotation_id);
       _exit(1);
   }
 
@@ -717,7 +847,7 @@ static void remove_annotation(int annotation_id) {
     pos_actions_t * pos_action;
     HASH_FIND_PTR(pos_actions_map, &el->pos, pos_action);
     if (!pos_action) {
-      fprintf(stderr, "expected pos_action for %p to exist\n", el->pos);
+      FPRINTF_TO_ERR_FILE("expected pos_action for %p to exist\n", el->pos);
     }
     LL_DELETE2(pos_action->actions, el, pos_next);
     action_t * count_el = NULL;
@@ -740,8 +870,7 @@ static void remove_annotation(int annotation_id) {
   HASH_DEL(annotations_map, annotation);
   free(annotation);
 
-  fprintf(stderr, "there are %d annotations, %d actions\n",
-          HASH_COUNT(annotations_map), HASH_COUNT(pos_actions_map));
+  print_annotations();
 }
 
 static void handle_ann_req(void) {
@@ -801,11 +930,11 @@ static void handle_ann_req(void) {
     LL_PREPEND2(ann->actions, action, annotation_next);
 
     // set breakpoint to enable action
-    set_breakpoint(action, /*quiet*/ 1);
+    set_breakpoint(action, /*quiet*/ 0);
   }
 
-  fprintf(stderr, "there are %d annotations, %d actions\n",
-          HASH_COUNT(annotations_map), HASH_COUNT(pos_actions_map));
+  FPRINTF_TO_ERR_FILE("add ann: %d\n", ann->id);
+  print_annotations();
 }
 
 static void handle_deann_req(void) {
@@ -858,6 +987,9 @@ static void __afl_start_forkserver(void) {
   action.sa_sigaction = &sigtrap_handler;
   action.sa_flags = SA_SIGINFO;
   sigaction(SIGTRAP, &action, NULL);
+  if ((put_err_log_fp = fopen("/tmp/fuzz_run/put_err.log", "a")) == NULL) {
+    fprintf(stderr, "Can't open error log file: %s\n", strerror(errno));
+  }
 
   if (__afl_dictionary_len > 0 && __afl_dictionary) {
 
@@ -923,10 +1055,6 @@ static void __afl_start_forkserver(void) {
     if (FD_ISSET(FORKSRV_FD + 2, &rfds)) {
       char cmd[4] = {0};
       read_from_command_pipe(cmd);
-      // if ((read(FORKSRV_FD + 2, &cmd, 4) != 4)) {
-      //   fprintf(stderr, "command read failed %s\n", cmd);
-      //   _exit(1);
-      // }
       if (strncmp("BB_R", cmd, 4) == 0) {
         handle_bb_req();
       } else if (strncmp("EANR", cmd, 4) == 0) {
@@ -934,7 +1062,7 @@ static void __afl_start_forkserver(void) {
       } else if (strncmp("DANR", cmd, 4) == 0) {
         handle_deann_req();
       } else {
-        fprintf(stderr, "fuzzee unknown command: %s\n", cmd);
+        FPRINTF_TO_ERR_FILE("fuzzee unknown command: %s\n", cmd);
       }
       continue;
     }
