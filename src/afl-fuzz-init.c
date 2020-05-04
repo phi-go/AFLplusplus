@@ -2298,6 +2298,7 @@ static void __zmq_annotation_req(afl_state_t * afl) {
     FATAL("failed to allocated bb_annotation %s:%d", __FILE__, __LINE__);
   }
   Z_READ(&ann->id, sizeof(ann->id));
+  Z_READ(&ann->type, sizeof(ann->type));
   ann->shm_id = shmget(IPC_PRIVATE, sysconf(_SC_PAGESIZE), IPC_CREAT | IPC_EXCL | 0600);
   if (ann->shm_id == -1) {
     PFATAL("failed to get shm for bb_annotation");

@@ -152,8 +152,11 @@ struct queue_entry {
 
 };
 
+typedef enum {ANN_MIN, ANN_SET, ANN_MAX} annotation_type_t;
+
 typedef struct annotation {
   int id;
+  annotation_type_t type;
   int shm_id;
   void * shm_addr;
   int initialized;

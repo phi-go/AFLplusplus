@@ -553,9 +553,25 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
             el->cur_best = contender;
             improvement = 1;
           } else {
-            if (contender < el->cur_best) {
-              el->cur_best = contender;
-              improvement = 1;
+            switch(el->type) {
+              case ANN_MIN:
+                {
+                  if (contender < el->cur_best) {
+                    el->cur_best = contender;
+                    improvement = 1;
+                  }
+                }
+                break;
+              case ANN_MAX:
+                {
+                  if (contender > el->cur_best) {
+                    el->cur_best = contender;
+                    improvement = 1;
+                  }
+                }
+                break;
+              default:
+                FATAL("Unknown annotation type: %d", el->type);
             }
           }
         }

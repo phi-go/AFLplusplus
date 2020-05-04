@@ -402,7 +402,7 @@ struct BBReq {
 #define ANN_BYTE_CODE(X) \
   \
   X(START_VAL) \
-  X(VAL_IMM) X(VAL_REG) X(VAL_MEM) \
+  X(VAL_IMM) X(VAL_REG) X(VAL_MEM) X(VAL_PTR) \
   X(END_VAL) \
   \
   X(START_REG) \
@@ -441,7 +441,7 @@ struct BBReq {
   X(END_FUNC) \
   \
   X(START_GOAL) \
-  X(GOAL_MIN) \
+  X(GOAL_MIN) X(GOAL_SET) X(GOAL_MAX) \
   X(END_GOAL) \
   \
   X(MAX_BYTE_CODE)
@@ -461,14 +461,13 @@ static const char * bc_str(annotation_byte_code_t bc) {
   return annotation_byte_code_strings[bc];
 }
 
-static annotation_byte_code_t bc_check_valid_top_level(annotation_byte_code_t bc, int verbose) {
+static annotation_byte_code_t bc_check_valid_top_level(annotation_byte_code_t bc) {
   if (!(   (START_VAL < bc && bc < END_VAL)
         || (START_FUNC < bc && bc < END_FUNC)
         || (START_GOAL < bc && bc < END_GOAL))) {
         FPRINTF_TO_ERR_FILE("invalid top level byte code value %d %s\n", bc, bc_str(bc));
         _exit(1);
       }
-  if (verbose) FPRINTF_TO_ERR_FILE("top level: %s", bc_str(bc));
   return bc;
 }
 
@@ -589,7 +588,7 @@ static void remove_breakpoint(action_t * action, int quiet) {
 
 #define BC_PUSH(V) \
   if (stack_ptr >= stack + 64) { \
-      FPRINTF_TO_ERR_FILE("bc stack overflow"); \
+      FPRINTF_TO_ERR_FILE("bc stack overflow %s:%d\n", __FILE__, __LINE__); \
       _exit(1); \
   } \
   *stack_ptr = V; \
@@ -598,14 +597,14 @@ static void remove_breakpoint(action_t * action, int quiet) {
 #define BC_POP(V) \
   stack_ptr -= 1; \
   if (stack_ptr < stack) { \
-    FPRINTF_TO_ERR_FILE("bc stack underflow"); \
+    FPRINTF_TO_ERR_FILE("bc stack underflow %s:%d\n", __FILE__, __LINE__); \
     _exit(1); \
   } \
   V = *stack_ptr;
 
 #define BC_PEEK(V) \
   if (stack_ptr-1 < stack) { \
-    FPRINTF_TO_ERR_FILE("bc stack underflow"); \
+    FPRINTF_TO_ERR_FILE("bc stack underflow %s:%d\n", __FILE__, __LINE__); \
     _exit(1); \
   } \
   V = *(stack_ptr-1);
@@ -648,13 +647,21 @@ static uint64_t bc_get_reg(annotation_byte_code_t reg, ucontext_t * ctx, int all
       return ctx->uc_mcontext.gregs[REG_RBP];
     case EBP:
       return REGISTER_EXTENDED(ctx->uc_mcontext.gregs[REG_RBP]);
+    case RIP:
+      return ctx->uc_mcontext.gregs[REG_RIP];
+    case CS:
+      return  ctx->uc_mcontext.gregs[REG_CSGSFS]        & 0xFFFF;
+    case FS:
+      return (ctx->uc_mcontext.gregs[REG_CSGSFS] >> 16) & 0xFFFF;
+    case GS:
+      return (ctx->uc_mcontext.gregs[REG_CSGSFS] >> 32) & 0xFFFF;
     default:
-      FPRINTF_TO_ERR_FILE("unhandled reg: %s(%d) ", bc_str(reg), reg);
+      FPRINTF_TO_ERR_FILE("unhandled reg: %s(%d)\n", bc_str(reg), reg);
       _exit(1);
   }
 }
-  
-static uint64_t bc_get_mem(annotation_byte_code_t segment_reg,
+
+static uint64_t bc_get_ptr(annotation_byte_code_t segment_reg,
                     annotation_byte_code_t base_reg,
                     uint64_t index,
                     uint64_t scale,
@@ -665,18 +672,37 @@ static uint64_t bc_get_mem(annotation_byte_code_t segment_reg,
   uint64_t segment = bc_get_reg(segment_reg, ctx, /* allow no_reg */ 1, verbose);
   uint64_t base = bc_get_reg(base_reg, ctx, /* allow no_reg */ 1, verbose);
   uint64_t addr = segment + base + index*scale + displacement;
-  if (verbose) { FPRINTF_TO_ERR_FILE("addr: %p (size)\n", addr, size); }
+  if (verbose) { FPRINTF_TO_ERR_FILE("addr: %p + %p + %d*%d + %d = %p (%d)\n",
+                 segment, base, index, scale, displacement, addr, size); }
+  return addr;
+}
+  
+static uint64_t bc_get_mem(annotation_byte_code_t segment_reg,
+                    annotation_byte_code_t base_reg,
+                    uint64_t index,
+                    uint64_t scale,
+                    uint64_t displacement,
+                    uint32_t size,
+                    ucontext_t * ctx,
+                    int verbose) {
+  uint64_t addr = bc_get_ptr(segment_reg, base_reg, index, scale, displacement, size, ctx, verbose);
+  uint64_t res = 0;
   switch(size) {
     case 8:
-      return *(uint64_t*)addr;
+      res = *(uint64_t*)addr;
+      break;
     case 4:
-      return *(uint32_t*)addr;
+      res = *(uint32_t*)addr;
+      break;
     case 2:
-      return *(uint16_t*)addr;
+      res = *(uint16_t*)addr;
+      break;
     case 1:
-      return *(uint8_t*)addr;
+      res = *(uint8_t*)addr;
+      break;
   }
-  return *(uint64_t*)addr;
+  if (verbose) { FPRINTF_TO_ERR_FILE("mem: %x @ addr: %p (%d)\n", res, addr, size); }
+  return res;
 }
 
 static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_len,
@@ -684,10 +710,10 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
   int i = 0;
   uint64_t stack[BC_MAX_STACK];
   uint64_t * stack_ptr = stack;
-  if (verbose) { FPRINTF_TO_ERR_FILE("exec(%d): \n", byte_code_len); }
+  if (verbose) { FPRINTF_TO_ERR_FILE("\nexec(%d): \n", byte_code_len); }
   while (i < byte_code_len) {
     if (verbose) { FPRINTF_TO_ERR_FILE("inst: %s(%d)\n", bc_str(byte_code[i]), byte_code[i]); }
-    switch(bc_check_valid_top_level(byte_code[i++], verbose)) {
+    switch(bc_check_valid_top_level(byte_code[i++])) {
       case VAL_IMM:
         if (verbose) { FPRINTF_TO_ERR_FILE("imm: %x | %d\n", byte_code[i], byte_code[i]); };
         BC_PUSH(byte_code[i++]);
@@ -704,6 +730,18 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
           annotation_byte_code_t displacement = byte_code[i++];
           annotation_byte_code_t size = byte_code[i++];
           BC_PUSH(bc_get_mem(segment_reg, base_reg, index, scale, displacement, size,
+                             ctx, verbose));
+        }
+        break;
+      case VAL_PTR:
+        {
+          annotation_byte_code_t segment_reg = byte_code[i++];
+          annotation_byte_code_t base_reg = byte_code[i++];
+          annotation_byte_code_t index = byte_code[i++];
+          annotation_byte_code_t scale = byte_code[i++];
+          annotation_byte_code_t displacement = byte_code[i++];
+          annotation_byte_code_t size = byte_code[i++];
+          BC_PUSH(bc_get_ptr(segment_reg, base_reg, index, scale, displacement, size,
                              ctx, verbose));
         }
         break;
@@ -744,8 +782,29 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
           }
         }
         break;
+      case GOAL_MAX:
+        {
+          annotation_t * annotation;
+          HASH_FIND_INT(annotations_map, &action->annotation_id, annotation);
+          NULL_CHECK(annotation);
+          NULL_CHECK(annotation->shm_addr);
+          uint64_t * annotation_used = annotation->shm_addr;
+          uint64_t * annotation_res = (uint64_t*)annotation->shm_addr + 1;
+          uint64_t old_res = *annotation_res;
+          uint64_t new_res;
+          BC_PEEK(new_res);
+          if (!(*annotation_used)) {
+            *annotation_used = 1;
+            *annotation_res = new_res;
+          } else if (new_res > old_res) {
+            printf("ann seen AGAIN (%p), old: %d new %d\n", action->pos, old_res, new_res);
+            *annotation_res = new_res;
+          }
+        }
+        break;
       default:
         FPRINTF_TO_ERR_FILE("unhandled bc: %s(%d) \n", bc_str(byte_code[i-1]), byte_code[i-1]);
+        return;
     }
     if (verbose) { BC_PRINT_STACK(); }
   }
@@ -766,11 +825,17 @@ static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
     HASH_FIND_PTR(pos_actions_map, &pos, actions);
     if (actions) {
       action_t * act = actions->actions;
+      LL_FOREACH2(actions->actions, act, pos_next) {
+        int verbose = act->pos == (uint8_t*)0x0; // for debugging purposes
+        exec_annotation(act->byte_code, act->byte_code_len, ctx, act, verbose);
+      }
+
+      act = actions->actions;
 
       // restore old instruction and single step once then we can get the result
       single_step_size = act->instruction_size;
       
-      // set trap flag to start tracing
+      // set trap flag to start single stepping
       ctx->uc_mcontext.gregs[REG_EFL] |= 0x100;
 
       // set RIP so that instruction is repeated
@@ -789,10 +854,6 @@ static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
     if (actions) {
       action_t * act = actions->actions;
       set_breakpoint(act, /*quiet*/ 1);
-      LL_FOREACH2(actions->actions, act, pos_next) {
-        int verbose = act->pos == (uint8_t*)0x0; // for debugging purposes
-        exec_annotation(act->byte_code, act->byte_code_len, ctx, act, verbose);
-      }
     } else {
       FPRINTF_TO_ERR_FILE("no actions for %p found (after stepping %d - real pos %p)\n",
               pos, single_step_size, (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP]);
