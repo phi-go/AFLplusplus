@@ -25,6 +25,7 @@
 
 #include "afl-fuzz.h"
 #include <limits.h>
+#include <poll.h>
 
 #ifdef HAVE_AFFINITY
 
@@ -2240,7 +2241,7 @@ static int64_t __zmq_has_more(afl_state_t * afl) {
 
 #define read_from_command_pipe(V, S) \
   if ((read(afl->fsrv.fsrv_cmdr_fd, V, S) != S)) { \
-    FATAL("command read failed %s:%d\n", __FILE__, __LINE__); \
+    PFATAL("command read failed %s:%d\n", __FILE__, __LINE__); \
   }
 
 void zmq_send_file_path(afl_state_t * afl, char * file_path, u64 execs) {
@@ -2349,6 +2350,7 @@ static void __zmq_annotation_req(afl_state_t * afl) {
   // a value of action_pos == 0 is the in band EOF signal
   uint8_t * no_more = NULL;
   write_to_command_pipe(&no_more, sizeof(no_more));
+  z_send("FEAR", 4, 0);
 }
 
 void remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann) {
@@ -2409,6 +2411,8 @@ static void __zmq_deannotation_req(afl_state_t * afl) {
   char cmd[4] = "DANR";
   write_to_command_pipe(&cmd, sizeof(cmd));
   write_to_command_pipe(&id, sizeof(id));
+
+  z_send("FDAR", 4, 0);
 }
 
 #define MSG_SIZE 4
@@ -2429,6 +2433,26 @@ void zmq_handle_commands(afl_state_t * afl) {
         __zmq_deannotation_req(afl);
       } else {
         fprintf(stderr, "ZMQ unknown message type: %s\n", msg_type);
+      }
+      struct pollfd fd[1];
+      fd[0].fd = afl->fsrv.fsrv_cmdr_fd;
+      fd[0].events = POLLIN;
+      fd[0].revents = 0;
+      int retpoll = poll(fd, 1, 1);
+      if (retpoll > 0 ) {
+        if (!(fd[0].revents & POLLIN)) {
+          SAYF("Unexpected poll event while waiting for DONE msg from forkserver: %x", fd[0].revents);
+          return;
+        }
+        char done_msg[4] = { 0 };
+        read_from_command_pipe(&done_msg, 4);
+        if (strncmp("DONE", done_msg, 4) != 0) {
+          FATAL("Did not get DONE msg from forkserver");
+        }
+      } else if (retpoll == 0) {
+          FATAL("Timed out while getting DONE msg from forkserver");
+      } else {
+        PFATAL("Poll for DONE msg from forkserver failed");
       }
     }
   }

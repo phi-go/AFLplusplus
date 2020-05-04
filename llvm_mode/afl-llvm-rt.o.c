@@ -649,6 +649,8 @@ static uint64_t bc_get_reg(annotation_byte_code_t reg, ucontext_t * ctx, int all
       return REGISTER_EXTENDED(ctx->uc_mcontext.gregs[REG_RBP]);
     case RIP:
       return ctx->uc_mcontext.gregs[REG_RIP];
+    case RSP:
+      return ctx->uc_mcontext.gregs[REG_RSP];
     case CS:
       return  ctx->uc_mcontext.gregs[REG_CSGSFS]        & 0xFFFF;
     case FS:
@@ -869,18 +871,25 @@ static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
 static void print_annotations() {
   annotation_t * an;
   action_t * ac;
-  char msg [1024];
-  char *cur = msg, * const end = msg + sizeof msg;
+  char msg [4096];
+  char *cur = msg, * const end = msg + sizeof(msg);
   cur += snprintf(cur, end-cur, "there are %d annotations, %d actions: ",
           HASH_COUNT(annotations_map), HASH_COUNT(pos_actions_map));
   for (an=annotations_map; an != NULL; an=an->hh.next) {
+    if (cur >= end) break;
     cur += snprintf(cur, end-cur, "\n\t%d (", an->id);
     LL_FOREACH2(an->actions, ac, annotation_next) {
+      if (cur >= end) break;
       cur += snprintf(cur, end-cur, "%p, ", ac->pos);
     }
+    if (cur >= end) break;
     cur += snprintf(cur, end-cur, ") ");
   }
-  *cur = '\0';
+  if (cur > end) {
+    *end = '\0';
+  } else {
+    *cur = '\0';
+  }
   FPRINTF_TO_ERR_FILE("%s\n", msg);
 }
 
@@ -931,7 +940,7 @@ static void remove_annotation(int annotation_id) {
   HASH_DEL(annotations_map, annotation);
   free(annotation);
 
-  print_annotations();
+  // print_annotations();
 }
 
 static void handle_ann_req(void) {
@@ -991,11 +1000,10 @@ static void handle_ann_req(void) {
     LL_PREPEND2(ann->actions, action, annotation_next);
 
     // set breakpoint to enable action
-    set_breakpoint(action, /*quiet*/ 0);
+    set_breakpoint(action, /*quiet*/ 1);
   }
 
-  FPRINTF_TO_ERR_FILE("add ann: %d\n", ann->id);
-  print_annotations();
+  // print_annotations();
 }
 
 static void handle_deann_req(void) {
@@ -1125,6 +1133,8 @@ static void __afl_start_forkserver(void) {
       } else {
         FPRINTF_TO_ERR_FILE("fuzzee unknown command: %s\n", cmd);
       }
+      char done_msg[4] = "DONE";
+      write_to_command_pipe(&done_msg, 4);
       continue;
     }
 

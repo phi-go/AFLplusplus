@@ -808,12 +808,19 @@ void show_stats(afl_state_t *afl) {
        " annotations " bSTG bH20 bH10 bH5 bH2 bH bHT bH20 bH2 bH bRT);
 
   if (get_head(&afl->annotations)->next) {
+    int i = 0;
     LIST_FOREACH(&afl->annotations, annotation_t, {
-      SAYF("\n" bV bSTOP cGRA);
-      sprintf(tmp, "id: %d cur(%d): %lu", el->id, el->initialized, el->cur_best);
-      SAYF(" %-74s ", tmp);
-      SAYF(SET_G1 bSTG bV);
+      if (i++ < 40) {
+        SAYF("\n" bV bSTOP cRST);
+        sprintf(tmp, "id: %d cur(%d): %lu", el->id, el->initialized, el->cur_best);
+        SAYF(" %-74s ", tmp);
+        SAYF(SET_G1 bSTG bV);
+      }
     });
+    SAYF("\n" bV bSTOP cGRA);
+    sprintf(tmp, "total: %d", i);
+    SAYF(" %-74s ", tmp);
+    SAYF(SET_G1 bSTG bV);
   }
 
   /* Last line */

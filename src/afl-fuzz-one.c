@@ -378,7 +378,6 @@ u8 fuzz_one_original(afl_state_t *afl) {
     if (((afl->queue_cur->was_fuzzed > 0 || afl->queue_cur->fuzz_level > 0) ||
          !afl->queue_cur->favored) &&
         rand_below(afl, 100) < SKIP_TO_NEW_PROB) {
-          SAYF("skipped %d %d, %d, %d\n", afl->pending_favored, afl->queue_cur->was_fuzzed, afl->queue_cur->fuzz_level, !afl->queue_cur->favored);
           return 1;
         }
 
