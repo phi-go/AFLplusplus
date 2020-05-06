@@ -355,6 +355,7 @@ static void __afl_start_snapshots(void) {
 
 #endif
 
+#define HASH_MAP_SIZE 1024
 FILE * put_err_log_fp = NULL;
 
 #define FPRINTF_TO_ERR_FILE(...) \
@@ -665,7 +666,7 @@ static uint64_t bc_get_reg(annotation_byte_code_t reg, ucontext_t * ctx, int all
 
 static uint64_t bc_get_ptr(annotation_byte_code_t segment_reg,
                     annotation_byte_code_t base_reg,
-                    uint64_t index,
+                    annotation_byte_code_t index_reg,
                     uint64_t scale,
                     uint64_t displacement,
                     uint32_t size,
@@ -673,21 +674,22 @@ static uint64_t bc_get_ptr(annotation_byte_code_t segment_reg,
                     int verbose) {
   uint64_t segment = bc_get_reg(segment_reg, ctx, /* allow no_reg */ 1, verbose);
   uint64_t base = bc_get_reg(base_reg, ctx, /* allow no_reg */ 1, verbose);
+  uint64_t index = bc_get_reg(index_reg, ctx, /* allow no_reg */ 1, verbose);
   uint64_t addr = segment + base + index*scale + displacement;
-  if (verbose) { FPRINTF_TO_ERR_FILE("addr: %p + %p + %d*%d + %d = %p (%d)\n",
+  if (verbose) { FPRINTF_TO_ERR_FILE("addr: %p + %p + %d*%d + %p = %p (%d)\n",
                  segment, base, index, scale, displacement, addr, size); }
   return addr;
 }
   
 static uint64_t bc_get_mem(annotation_byte_code_t segment_reg,
                     annotation_byte_code_t base_reg,
-                    uint64_t index,
+                    annotation_byte_code_t index_reg,
                     uint64_t scale,
                     uint64_t displacement,
                     uint32_t size,
                     ucontext_t * ctx,
                     int verbose) {
-  uint64_t addr = bc_get_ptr(segment_reg, base_reg, index, scale, displacement, size, ctx, verbose);
+  uint64_t addr = bc_get_ptr(segment_reg, base_reg, index_reg, scale, displacement, size, ctx, verbose);
   uint64_t res = 0;
   switch(size) {
     case 8:
@@ -703,7 +705,7 @@ static uint64_t bc_get_mem(annotation_byte_code_t segment_reg,
       res = *(uint8_t*)addr;
       break;
   }
-  if (verbose) { FPRINTF_TO_ERR_FILE("mem: %x @ addr: %p (%d)\n", res, addr, size); }
+  if (verbose) { FPRINTF_TO_ERR_FILE("mem: %x %d @ addr: %p (%d)\n", res, res, addr, size); }
   return res;
 }
 
@@ -727,11 +729,11 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
         {
           annotation_byte_code_t segment_reg = byte_code[i++];
           annotation_byte_code_t base_reg = byte_code[i++];
-          annotation_byte_code_t index = byte_code[i++];
+          annotation_byte_code_t index_reg = byte_code[i++];
           annotation_byte_code_t scale = byte_code[i++];
           annotation_byte_code_t displacement = byte_code[i++];
           annotation_byte_code_t size = byte_code[i++];
-          BC_PUSH(bc_get_mem(segment_reg, base_reg, index, scale, displacement, size,
+          BC_PUSH(bc_get_mem(segment_reg, base_reg, index_reg, scale, displacement, size,
                              ctx, verbose));
         }
         break;
@@ -739,11 +741,11 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
         {
           annotation_byte_code_t segment_reg = byte_code[i++];
           annotation_byte_code_t base_reg = byte_code[i++];
-          annotation_byte_code_t index = byte_code[i++];
+          annotation_byte_code_t index_reg = byte_code[i++];
           annotation_byte_code_t scale = byte_code[i++];
           annotation_byte_code_t displacement = byte_code[i++];
           annotation_byte_code_t size = byte_code[i++];
-          BC_PUSH(bc_get_ptr(segment_reg, base_reg, index, scale, displacement, size,
+          BC_PUSH(bc_get_ptr(segment_reg, base_reg, index_reg, scale, displacement, size,
                              ctx, verbose));
         }
         break;
@@ -802,6 +804,31 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
             printf("ann seen AGAIN (%p), old: %d new %d\n", action->pos, old_res, new_res);
             *annotation_res = new_res;
           }
+        }
+        break;
+      case GOAL_SET:
+        {
+          annotation_t * annotation;
+          HASH_FIND_INT(annotations_map, &action->annotation_id, annotation);
+          NULL_CHECK(annotation);
+          NULL_CHECK(annotation->shm_addr);
+          uint64_t * annotation_used = annotation->shm_addr;
+          uint8_t * annotation_res = (uint8_t*)((uint64_t*)annotation->shm_addr + 1);
+          uint64_t x;
+          BC_PEEK(x);
+          if (verbose) { FPRINTF_TO_ERR_FILE("val: %llx ", x); }
+          // hash it
+          x = (x ^ (x >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
+          x = (x ^ (x >> 27)) * UINT64_C(0x94d049bb133111eb);
+          x = x ^ (x >> 31);
+          if (verbose) { FPRINTF_TO_ERR_FILE("hashed: %llx ", x); }
+          x = x % (HASH_MAP_SIZE*8);
+          if (verbose) { FPRINTF_TO_ERR_FILE("comp: %llx ", x); }
+          int byte_offset = x/8;
+          int bit_offset = x%8;
+          if (verbose) { FPRINTF_TO_ERR_FILE("byte_off: %d bit_off: %d\n", byte_offset, bit_offset); }
+          *annotation_used = 1;
+          annotation_res[byte_offset] |= (1 << (bit_offset));
         }
         break;
       default:
@@ -900,7 +927,6 @@ static void handle_bb_req() {
 }
 
 static void remove_annotation(int annotation_id) {
-  FPRINTF_TO_ERR_FILE("remove ann: %d\n", annotation_id);
   // find annotation
   annotation_t * annotation;
   HASH_FIND_INT(annotations_map, &annotation_id, annotation);

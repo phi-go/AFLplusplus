@@ -506,6 +506,7 @@ static void write_crash_readme(afl_state_t *afl) {
 
 }
 
+
 /* Check if the result of an execve() during routine fuzzing is interesting,
    save or queue the input test case for further analysis if so. Returns 1 if
    entry is saved, 0 otherwise. */
@@ -546,41 +547,76 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
       LIST_FOREACH(&afl->annotations, annotation_t, {
         int improvement = 0;
         uint64_t touched = *(uint64_t*)el->shm_addr;
-        uint64_t contender = *((uint64_t*)el->shm_addr+1);
         if (touched) {
-          if (!el->initialized) {
-            el->initialized = 1;
-            el->cur_best = contender;
-            improvement = 1;
-          } else {
-            switch(el->type) {
-              case ANN_MIN:
-                {
-                  if (contender < el->cur_best) {
-                    el->cur_best = contender;
+          switch(el->type) {
+            case ANN_MIN:
+              {
+                uint64_t contender = *((uint64_t*)el->shm_addr+1);
+                if (!el->initialized) {
+                  el->initialized = 1;
+                  el->cur_best[0] = contender;
+                  improvement = 1;
+                } else {
+                  if (contender < el->cur_best[0]) {
+                    el->cur_best[0] = contender;
                     improvement = 1;
                   }
                 }
-                break;
-              case ANN_MAX:
-                {
-                  if (contender > el->cur_best) {
-                    el->cur_best = contender;
+              }
+              break;
+            case ANN_MAX:
+              {
+                uint64_t contender = *((uint64_t*)el->shm_addr+1);
+                if (!el->initialized) {
+                  el->initialized = 1;
+                  el->cur_best[0] = contender;
+                  improvement = 1;
+                } else {
+                  if (contender > el->cur_best[0]) {
+                    el->cur_best[0] = contender;
                     improvement = 1;
                   }
                 }
-                break;
-              default:
-                FATAL("Unknown annotation type: %d", el->type);
-            }
+              }
+              break;
+            case ANN_SET:
+              {
+                uint64_t * bitmap = (uint64_t*)el->shm_addr+1;
+                for(int i = 0; i < ANNOTATION_BITMAP_SIZE; i++) {
+                  int cur_best = __builtin_popcountll(el->cur_best[i]);
+                  int contender = __builtin_popcountll(el->cur_best[i] |bitmap[i]);
+                  if (contender > cur_best) {
+                      el->cur_best[i] |= bitmap[i];
+                      improvement += contender-cur_best;
+                  }
+                }
+                el->initialized = 1;
+              }
+              break;
+            default:
+              FATAL("Unknown annotation type: %d", el->type);
           }
         }
         if (improvement) {
           ia = 1;
-          zmq_send_annotation_update(afl, el->id, el->cur_best);
-          queue_fn = alloc_printf("%s/queue/id:%06u,%s,ann:%d,best:%lu", afl->out_dir,
-                                  afl->total_queued_paths, describe_op(afl, 0),
-                                  el->id, el->cur_best);
+          el->times_improved += improvement;
+          switch (el->type) {
+            case ANN_MIN:
+            case ANN_MAX:
+              zmq_send_annotation_update(afl, el->id, el->cur_best[0]);
+              queue_fn = alloc_printf("%s/queue/id:%06u,%s,ann:%d,best:%lu", afl->out_dir,
+                                      afl->total_queued_paths, describe_op(afl, 0),
+                                      el->id, el->cur_best[0]);
+              break;
+            case ANN_SET:
+              zmq_send_annotation_update(afl, el->id, improvement);
+              queue_fn = alloc_printf("%s/queue/id:%06u,%s,ann:%d,best:%d", afl->out_dir,
+                                      afl->total_queued_paths, describe_op(afl, 0),
+                                      el->id, el->times_improved);
+              break;
+            default:
+              FATAL("Unknown annotation type %d", el->type);
+          }
           fd = open(queue_fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
           if (unlikely(fd < 0)) PFATAL("Unable to create '%s'", queue_fn);
           ck_write(fd, mem, len, queue_fn);

@@ -811,10 +811,33 @@ void show_stats(afl_state_t *afl) {
     int i = 0;
     LIST_FOREACH(&afl->annotations, annotation_t, {
       if (i++ < 40) {
-        SAYF("\n" bV bSTOP cRST);
-        sprintf(tmp, "id: %d cur(%d): %lu", el->id, el->initialized, el->cur_best);
-        SAYF(" %-74s ", tmp);
-        SAYF(SET_G1 bSTG bV);
+        switch (el->type) {
+
+          case(ANN_MIN): {
+            SAYF("\n" bV bSTOP cRST);
+            sprintf(tmp, "id: %4d min(%d) %4d: %lu", el->id, el->initialized, el->times_improved, el->cur_best[0]);
+            SAYF(" %-74s ", tmp);
+            SAYF(SET_G1 bSTG bV);
+          } break;
+
+          case(ANN_MAX): {
+            SAYF("\n" bV bSTOP cRST);
+            sprintf(tmp, "id: %4d max(%d) %4d: %lu", el->id, el->initialized, el->times_improved, el->cur_best[0]);
+            SAYF(" %-74s ", tmp);
+            SAYF(SET_G1 bSTG bV);
+          } break;
+
+          case(ANN_SET): {
+            SAYF("\n" bV bSTOP cRST);
+            sprintf(tmp, "id: %4d set(%d) %4d", el->id, el->initialized, el->times_improved);
+            SAYF(" %-74s ", tmp);
+            SAYF(SET_G1 bSTG bV);
+          } break;
+
+          default:
+            FATAL("unknown annotation type %d", el->type);
+
+        }
       }
     });
     SAYF("\n" bV bSTOP cGRA);

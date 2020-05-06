@@ -2192,7 +2192,7 @@ void connect_zmq(afl_state_t * afl) {
   OKF("Connecting to ZMQ as '%s'", zmq_id);
   afl->zmq_context = zmq_ctx_new();
   afl->zmq_socket = zmq_socket(afl->zmq_context, ZMQ_DEALER);
-  zmq_setsockopt(afl->zmq_socket, ZMQ_IDENTITY, zmq_id, strlen(zmq_id)); 
+  zmq_setsockopt(afl->zmq_socket, ZMQ_IDENTITY, zmq_id, strlen(zmq_id));
 
   if (zmq_connect(afl->zmq_socket, afl_zmq_url) != 0) {
     printf("ZMQ error: %s\n", strerror(errno));
@@ -2244,9 +2244,32 @@ static int64_t __zmq_has_more(afl_state_t * afl) {
     PFATAL("command read failed %s:%d\n", __FILE__, __LINE__); \
   }
 
+static int get_associated_annotation_id(afl_state_t * afl, struct queue_entry * cur_entry) {
+  int id = -1;
+  if (get_head(&afl->annotations)->next) {
+    LIST_FOREACH(&afl->annotations, annotation_t, {
+      if (list_contains(&el->corresponding_queue_files, cur_entry)) {
+        id = el->id;
+        break;
+      }
+    });
+  }
+  return id;
+}
+
+void zmq_send_exec_update(afl_state_t * afl, struct queue_entry * cur_entry, u64 execs) {
+  if (afl->zmq_socket) {
+    int associated_ann_id = get_associated_annotation_id(afl, cur_entry);
+    z_send("F_QX", 4, ZMQ_SNDMORE);
+    z_send(&execs, sizeof(execs), ZMQ_SNDMORE);
+    z_send(cur_entry->fname, strlen(cur_entry->fname), ZMQ_SNDMORE);
+    z_send(&associated_ann_id, sizeof(associated_ann_id), 0);
+  }
+}
+
 void zmq_send_file_path(afl_state_t * afl, char * file_path, u64 execs) {
   if (afl->zmq_socket) {
-    z_send("F_QX", 4, ZMQ_SNDMORE);
+    z_send("F_QN", 4, ZMQ_SNDMORE);
     z_send(&execs, sizeof(execs), ZMQ_SNDMORE);
     z_send(file_path, strlen(file_path), 0);
   }
@@ -2310,7 +2333,8 @@ static void __zmq_annotation_req(afl_state_t * afl) {
   }
   shmctl(ann->shm_id, IPC_RMID, NULL);
   ann->initialized = 0;
-  ann->cur_best = 0; // is overwritten when initialized
+  ann->times_improved = 0;
+  memset(ann->cur_best, 0, sizeof(ann->cur_best)); // is overwritten when initialized
   list_append(&afl->annotations, ann);
 
   char cmd[4] = "EANR";
@@ -2380,7 +2404,16 @@ void leave_best_annotation_queue_file(afl_state_t * afl, annotation_t * ann) {
 void clean_up_annotation_queue_files(afl_state_t * afl) {
   if (get_head(&afl->annotations)->next) {
     LIST_FOREACH(&afl->annotations, annotation_t, {
-      leave_best_annotation_queue_file(afl, el);
+      switch(el->type) {
+        case ANN_MIN:
+        case ANN_MAX:
+          leave_best_annotation_queue_file(afl, el);
+          break;
+        case ANN_SET:
+          break; // keep all, they are all interesting
+        default:
+          FATAL("Unknown annotation type %d", el->type);
+      }
     });
   }
 }
