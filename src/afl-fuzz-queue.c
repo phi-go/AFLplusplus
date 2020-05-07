@@ -458,7 +458,6 @@ void cull_queue(afl_state_t *afl) {
   while (q) {
 
     if (!q->favored && q->annotation_favored) {
-      SAYF("ann fav: %d\n", q->id);
       q->favored = 1;
       ++afl->pending_favored;
     } 
