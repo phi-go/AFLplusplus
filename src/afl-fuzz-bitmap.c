@@ -543,8 +543,8 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
     int ia = 0;
     // keep if annotations are improved
-    if (get_head(&afl->annotations)->next) {
-      LIST_FOREACH(&afl->annotations, annotation_t, {
+    if (get_head(&afl->active_annotations)->next) {
+      LIST_FOREACH(&afl->active_annotations, annotation_t, {
         int improvement = 0;
         uint64_t touched = *(uint64_t*)el->shm_addr;
         if (touched) {

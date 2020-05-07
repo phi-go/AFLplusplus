@@ -2246,11 +2246,13 @@ static int64_t __zmq_has_more(afl_state_t * afl) {
 
 static int get_associated_annotation_id(afl_state_t * afl, struct queue_entry * cur_entry) {
   int id = -1;
-  if (get_head(&afl->annotations)->next) {
-    LIST_FOREACH(&afl->annotations, annotation_t, {
-      if (list_contains(&el->corresponding_queue_files, cur_entry)) {
-        id = el->id;
-        break;
+  if (get_head(&afl->all_annotations)->next) {
+    LIST_FOREACH(&afl->all_annotations, annotation_t, {
+      if (get_head(&el->corresponding_queue_files)->next) {
+        if (list_contains(&el->corresponding_queue_files, cur_entry)) {
+          id = el->id;
+          break;
+        }
       }
     });
   }
@@ -2335,7 +2337,7 @@ static void __zmq_annotation_req(afl_state_t * afl) {
   ann->initialized = 0;
   ann->times_improved = 0;
   memset(ann->cur_best, 0, sizeof(ann->cur_best)); // is overwritten when initialized
-  list_append(&afl->annotations, ann);
+  list_append(&afl->all_annotations, ann);
 
   char cmd[4] = "EANR";
   write_to_command_pipe(&cmd, 4);
@@ -2402,8 +2404,8 @@ void leave_best_annotation_queue_file(afl_state_t * afl, annotation_t * ann) {
 }
 
 void clean_up_annotation_queue_files(afl_state_t * afl) {
-  if (get_head(&afl->annotations)->next) {
-    LIST_FOREACH(&afl->annotations, annotation_t, {
+  if (get_head(&afl->all_annotations)->next) {
+    LIST_FOREACH(&afl->all_annotations, annotation_t, {
       switch(el->type) {
         case ANN_MIN:
         case ANN_MAX:
@@ -2430,7 +2432,13 @@ void mark_annotated_queue_file_as_favored(afl_state_t * afl, annotation_t * ann)
 static void __zmq_deannotation_req(afl_state_t * afl) {
   int id;
   Z_READ(&id, sizeof(id))
-  LIST_FOREACH(&afl->annotations, annotation_t, {
+  LIST_FOREACH(&afl->active_annotations, annotation_t, {
+    if (el->id == id) {
+      LIST_REMOVE_CURRENT_EL_IN_FOREACH();
+      break;
+    }
+  });
+  LIST_FOREACH(&afl->all_annotations, annotation_t, {
     if (el->id == id) {
       LIST_REMOVE_CURRENT_EL_IN_FOREACH();
       remove_annotation_queue_files(afl, el);
@@ -2446,6 +2454,64 @@ static void __zmq_deannotation_req(afl_state_t * afl) {
   write_to_command_pipe(&id, sizeof(id));
 
   z_send("FDAR", 4, 0);
+}
+
+static void check_forkserver_response(afl_state_t * afl) {
+  struct pollfd fd[1];
+  fd[0].fd = afl->fsrv.fsrv_cmdr_fd;
+  fd[0].events = POLLIN;
+  fd[0].revents = 0;
+  int retpoll = poll(fd, 1, 1);
+  if (retpoll > 0 ) {
+    if (!(fd[0].revents & POLLIN)) {
+      SAYF("Unexpected poll event while waiting for DONE msg from forkserver: %x", fd[0].revents);
+      return;
+    }
+    char done_msg[4] = { 0 };
+    read_from_command_pipe(&done_msg, 4);
+    if (strncmp("DONE", done_msg, 4) != 0) {
+      FATAL("Did not get DONE msg from forkserver");
+    }
+  } else if (retpoll == 0) {
+      FATAL("Timed out while getting DONE msg from forkserver");
+  } else {
+    PFATAL("Poll for DONE msg from forkserver failed");
+  }
+}
+
+static int queue_entry_belongs_to_ann(annotation_t * ann, struct queue_entry * qe) {
+  if (get_head(&ann->corresponding_queue_files)->next) {
+    LIST_FOREACH(&ann->corresponding_queue_files, struct queue_entry, {
+      if (el == qe) return 1;
+    });
+  }
+  return 0;
+}
+
+void adjust_active_annotations(afl_state_t * afl) {
+  if (get_head(&afl->active_annotations)->next) {
+    LIST_FOREACH_CLEAR(&afl->active_annotations, annotation_t, {
+      char cmd[4] = "D_AN";
+      write_to_command_pipe(&cmd, sizeof(cmd));
+      write_to_command_pipe(&el->id, sizeof(el->id));
+      check_forkserver_response(afl);
+    });
+  }
+  if (get_head(&afl->all_annotations)->next) {
+    LIST_FOREACH(&afl->all_annotations, annotation_t, {
+      if ((!el->initialized) || queue_entry_belongs_to_ann(el, afl->queue_cur)) {
+        list_append(&afl->active_annotations, el);
+      }
+    });
+  }
+  if (get_head(&afl->active_annotations)->next) {
+    LIST_FOREACH(&afl->active_annotations, annotation_t, {
+      char cmd[4] = "A_AN";
+      write_to_command_pipe(&cmd, sizeof(cmd));
+      write_to_command_pipe(&el->id, sizeof(el->id));
+      check_forkserver_response(afl);
+    });
+  }
 }
 
 #define MSG_SIZE 4
@@ -2467,26 +2533,7 @@ void zmq_handle_commands(afl_state_t * afl) {
       } else {
         fprintf(stderr, "ZMQ unknown message type: %s\n", msg_type);
       }
-      struct pollfd fd[1];
-      fd[0].fd = afl->fsrv.fsrv_cmdr_fd;
-      fd[0].events = POLLIN;
-      fd[0].revents = 0;
-      int retpoll = poll(fd, 1, 1);
-      if (retpoll > 0 ) {
-        if (!(fd[0].revents & POLLIN)) {
-          SAYF("Unexpected poll event while waiting for DONE msg from forkserver: %x", fd[0].revents);
-          return;
-        }
-        char done_msg[4] = { 0 };
-        read_from_command_pipe(&done_msg, 4);
-        if (strncmp("DONE", done_msg, 4) != 0) {
-          FATAL("Did not get DONE msg from forkserver");
-        }
-      } else if (retpoll == 0) {
-          FATAL("Timed out while getting DONE msg from forkserver");
-      } else {
-        PFATAL("Poll for DONE msg from forkserver failed");
-      }
+      check_forkserver_response(afl);
     }
   }
 }

@@ -517,7 +517,7 @@ static __thread unsigned int single_step_size = 0;
 
 static void set_breakpoint(action_t * action, int quiet) {
   if (!(*action->pos == 0xCC || *action->pos == (uint8_t)action->instruction_bytes[0])) {
-      FPRINTF_TO_ERR_FILE("ann req pos (%p) is not 0xCC or expected initial 0x%x but 0x%x\n",
+      FPRINTF_TO_ERR_FILE("set bp pos (%p) is not 0xCC or expected initial 0x%x but 0x%x\n",
       action->pos, (uint8_t)action->instruction_bytes[0], *action->pos);
       _exit(1);
   }
@@ -533,8 +533,9 @@ static void set_breakpoint(action_t * action, int quiet) {
 }
 
 static void remove_breakpoint(action_t * action, int quiet) {
-  if (*action->pos != 0xcc) {
-      FPRINTF_TO_ERR_FILE("deann req pos (%lx) is not 0xcc but 0x%x\n", action->pos, *action->pos);
+  if (!(*action->pos == 0xcc || *action->pos == (uint8_t)action->instruction_bytes[0])) {
+      FPRINTF_TO_ERR_FILE("remove bp pos (%lx) is not 0xcc or expected initial 0x%x but 0x%x\n",
+      action->pos, (uint8_t)action->instruction_bytes[0], *action->pos);
       _exit(1);
   }
   if (!quiet) {
@@ -1039,6 +1040,30 @@ static void handle_deann_req(void) {
   // TODO return command success?
 }
 
+static void handle_activate_annotation() {
+  int id = 0;
+  read_from_command_pipe(id);
+  annotation_t * annotation;
+  HASH_FIND_INT(annotations_map, &id, annotation);
+  NULL_CHECK(annotation);
+  action_t * act = NULL;
+  LL_FOREACH2(annotation->actions, act, annotation_next) {
+      set_breakpoint(act, /*quiet*/ 1);
+  }
+}
+
+static void handle_deactivate_annotation() {
+  int id = 0;
+  read_from_command_pipe(id);
+  annotation_t * annotation;
+  HASH_FIND_INT(annotations_map, &id, annotation);
+  NULL_CHECK(annotation);
+  action_t * act = NULL;
+  LL_FOREACH2(annotation->actions, act, annotation_next) {
+      remove_breakpoint(act, /*quiet*/ 1);
+  }
+}
+
 /* Fork server logic. */
 
 static void __afl_start_forkserver(void) {
@@ -1150,7 +1175,11 @@ static void __afl_start_forkserver(void) {
     if (FD_ISSET(FORKSRV_FD + 2, &rfds)) {
       char cmd[4] = {0};
       read_from_command_pipe(cmd);
-      if (strncmp("BB_R", cmd, 4) == 0) {
+      if (strncmp("A_AN", cmd, 4) == 0) {
+        handle_activate_annotation();
+      } else if (strncmp("D_AN", cmd, 4) == 0) {
+        handle_deactivate_annotation();
+      } else if (strncmp("BB_R", cmd, 4) == 0) {
         handle_bb_req();
       } else if (strncmp("EANR", cmd, 4) == 0) {
         handle_ann_req();

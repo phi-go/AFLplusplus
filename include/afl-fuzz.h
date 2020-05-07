@@ -591,7 +591,8 @@ typedef struct afl_state {
   void *zmq_context;
   void *zmq_socket;
 
-  list_t annotations;
+  list_t all_annotations;
+  list_t active_annotations;
 
 #ifdef _AFL_DOCUMENT_MUTATIONS
   u8  do_document;
@@ -954,6 +955,7 @@ void   remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann);
 void   leave_best_annotation_queue_file(afl_state_t * afl, annotation_t * ann);
 void   clean_up_annotation_queue_files(afl_state_t * afl);
 void   mark_annotated_queue_file_as_favored(afl_state_t * afl, annotation_t * ann);
+void   adjust_active_annotations(afl_state_t * afl);
 
 /* CmpLog */
 

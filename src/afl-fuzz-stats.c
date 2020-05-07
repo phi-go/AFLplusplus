@@ -807,9 +807,51 @@ void show_stats(afl_state_t *afl) {
   SAYF(SET_G1 "\n" bSTG bVR bH bSTOP            cCYA
        " annotations " bSTG bH20 bH10 bH5 bH2 bH bHT bH20 bH2 bH bRT);
 
-  if (get_head(&afl->annotations)->next) {
-    int i = 0;
-    LIST_FOREACH(&afl->annotations, annotation_t, {
+  int i = 0;
+  if (get_head(&afl->active_annotations)->next) {
+    SAYF("\n" bV bSTOP cGRA);
+    SAYF(" %-74s ", "active annotations:");
+    SAYF(SET_G1 bSTG bV);
+    LIST_FOREACH(&afl->active_annotations, annotation_t, {
+      if (i++ < 40) {
+        switch (el->type) {
+
+          case(ANN_MIN): {
+            SAYF("\n" bV bSTOP cRST);
+            sprintf(tmp, "id: %4d min(%d) %4d: %lu", el->id, el->initialized, el->times_improved, el->cur_best[0]);
+            SAYF(" %-74s ", tmp);
+            SAYF(SET_G1 bSTG bV);
+          } break;
+
+          case(ANN_MAX): {
+            SAYF("\n" bV bSTOP cRST);
+            sprintf(tmp, "id: %4d max(%d) %4d: %lu", el->id, el->initialized, el->times_improved, el->cur_best[0]);
+            SAYF(" %-74s ", tmp);
+            SAYF(SET_G1 bSTG bV);
+          } break;
+
+          case(ANN_SET): {
+            SAYF("\n" bV bSTOP cRST);
+            sprintf(tmp, "id: %4d set(%d) %4d", el->id, el->initialized, el->times_improved);
+            SAYF(" %-74s ", tmp);
+            SAYF(SET_G1 bSTG bV);
+          } break;
+
+          default:
+            FATAL("unknown annotation type %d", el->type);
+
+        }
+      }
+    });
+  }
+
+  if (get_head(&afl->all_annotations)->next) {
+    int total = 0;
+    SAYF("\n" bV bSTOP cGRA);
+    SAYF(" %-74s ", "all annotations:");
+    SAYF(SET_G1 bSTG bV);
+    LIST_FOREACH(&afl->all_annotations, annotation_t, {
+      total++;
       if (i++ < 40) {
         switch (el->type) {
 
@@ -841,7 +883,7 @@ void show_stats(afl_state_t *afl) {
       }
     });
     SAYF("\n" bV bSTOP cGRA);
-    sprintf(tmp, "total: %d", i);
+    sprintf(tmp, "total: %d", total);
     SAYF(" %-74s ", tmp);
     SAYF(SET_G1 bSTG bV);
   }

@@ -1134,6 +1134,7 @@ int main(int argc, char **argv_orig, char **envp) {
 
     }
 
+    adjust_active_annotations(afl);
     skipped_fuzz = fuzz_one(afl);
 
     if (!skipped_fuzz && !afl->stop_soon && afl->sync_id) {
