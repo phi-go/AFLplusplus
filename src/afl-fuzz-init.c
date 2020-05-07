@@ -2420,15 +2420,6 @@ void clean_up_annotation_queue_files(afl_state_t * afl) {
   }
 }
 
-void mark_annotated_queue_file_as_favored(afl_state_t * afl, annotation_t * ann) {
-  if (get_head(&ann->corresponding_queue_files)->next) {
-    LIST_FOREACH(&ann->corresponding_queue_files, struct queue_entry, {
-      el->favored = 1;
-      ++afl->queued_favored;
-    });
-  }
-}
-
 static void __zmq_deannotation_req(afl_state_t * afl) {
   int id;
   Z_READ(&id, sizeof(id))

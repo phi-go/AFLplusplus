@@ -130,6 +130,7 @@ struct queue_entry {
       has_new_cov,                      /* Triggers new coverage?           */
       var_behavior,                     /* Variable behavior?               */
       favored,                          /* Currently favored?               */
+      annotation_favored,               /* Favored due to an annotation?    */
       fs_redundant,                     /* Marked as redundant in the fs?   */
       fully_colorized;                  /* Do not run redqueen stage again  */
 
@@ -954,7 +955,6 @@ void   zmq_handle_commands(afl_state_t *);
 void   remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann);
 void   leave_best_annotation_queue_file(afl_state_t * afl, annotation_t * ann);
 void   clean_up_annotation_queue_files(afl_state_t * afl);
-void   mark_annotated_queue_file_as_favored(afl_state_t * afl, annotation_t * ann);
 void   adjust_active_annotations(afl_state_t * afl);
 
 /* CmpLog */

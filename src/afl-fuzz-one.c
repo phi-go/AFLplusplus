@@ -2358,6 +2358,7 @@ abandon_entry:
   }
 
   ++afl->queue_cur->fuzz_level;
+  afl->queue_cur->annotation_favored = 0; // only favored once
 
   munmap(orig_in, afl->queue_cur->len);
   zmq_send_exec_update(afl, afl->queue_cur, afl->fsrv.total_execs - num_exec_start);
