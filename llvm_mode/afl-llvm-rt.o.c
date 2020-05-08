@@ -438,7 +438,7 @@ struct BBReq {
   X(END_REG) \
   \
   X(START_FUNC) \
-  X(CALC_ABS) X(CALC_SUB) \
+  X(CALC_ABS) X(CALC_SUB) X(CALC_HAMMING) \
   X(END_FUNC) \
   \
   X(START_GOAL) \
@@ -764,6 +764,14 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
           BC_POP(val);
           val = labs(val);
           BC_PUSH(val);
+        }
+        break;
+      case CALC_HAMMING:
+        {
+          uint64_t a, b;
+          BC_POP(a);
+          BC_POP(b);
+          BC_PUSH(__builtin_popcountll(a ^ b));
         }
         break;
       case GOAL_MIN:
