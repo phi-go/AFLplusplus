@@ -2479,7 +2479,7 @@ static int queue_entry_belongs_to_ann(annotation_t * ann, struct queue_entry * q
   return 0;
 }
 
-void adjust_active_annotations(afl_state_t * afl) {
+void adjust_active_annotations(afl_state_t * afl, int set_all_active) {
   if (get_head(&afl->active_annotations)->next) {
     LIST_FOREACH_CLEAR(&afl->active_annotations, annotation_t, {
       char cmd[4] = "D_AN";
@@ -2490,7 +2490,7 @@ void adjust_active_annotations(afl_state_t * afl) {
   }
   if (get_head(&afl->all_annotations)->next) {
     LIST_FOREACH(&afl->all_annotations, annotation_t, {
-      if ((!el->initialized) || queue_entry_belongs_to_ann(el, afl->queue_cur)) {
+      if (set_all_active || (!el->initialized) || queue_entry_belongs_to_ann(el, afl->queue_cur)) {
         list_append(&afl->active_annotations, el);
       }
     });
@@ -2503,6 +2503,37 @@ void adjust_active_annotations(afl_state_t * afl) {
       check_forkserver_response(afl);
     });
   }
+}
+
+void exchange_new_queue_files(afl_state_t * afl) {
+  adjust_active_annotations(afl, 1);
+
+  s32 len, fd;
+  u8 *buf = 0;
+  struct queue_entry * q = afl->queue_top, * old_queue_cur = afl->queue_cur;
+  afl->syncing_annotation = 1;
+  while (q) {
+    if (q->id <= afl->ann_exchanged_queue_files) break;
+    afl->queue_cur = q;
+    fd = open(afl->queue_cur->fname, O_RDONLY);
+
+    if (unlikely(fd < 0)) PFATAL("Unable to open '%s'", afl->queue_cur->fname);
+
+    len = afl->queue_cur->len;
+
+    buf = mmap(0, len, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+
+    if (unlikely(buf == MAP_FAILED))
+      PFATAL("Unable to mmap '%s' with len %d", afl->queue_cur->fname, len);
+
+    close(fd);
+    common_fuzz_stuff(afl, buf, len);
+    munmap(buf, len);
+    q = q->prev;
+  }
+  afl->ann_exchanged_queue_files = afl->queue_top->id;
+  afl->syncing_annotation = 0;
+  afl->queue_cur = old_queue_cur;
 }
 
 #define MSG_SIZE 4

@@ -413,7 +413,13 @@ u8 *describe_op(afl_state_t *afl, u8 hnb) {
 
   u8 *ret = afl->describe_op_buf_256;
 
-  if (unlikely(afl->syncing_party)) {
+  if (unlikely(afl->syncing_annotation)) {
+
+    sprintf(ret, "ann_sync_src:%06u,time:%llu",
+            afl->queue_cur->id, get_cur_time() - afl->start_time);
+    return ret;
+
+  } else if (unlikely(afl->syncing_party)) {
 
     sprintf(ret, "sync:%s,src:%06u", afl->syncing_party, afl->syncing_case);
 

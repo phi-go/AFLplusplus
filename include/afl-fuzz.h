@@ -461,7 +461,8 @@ typedef struct afl_state {
       deferred_mode,                    /* Deferred forkserver mode?        */
       fixed_seed,                       /* do not reseed                    */
       fast_cal,                         /* Try to calibrate faster?         */
-      disable_trim;                     /* Never trim in fuzz_one           */
+      disable_trim,                     /* Never trim in fuzz_one           */
+      syncing_annotation;               /* Currently syncing annotations queue files */
 
   u8 *virgin_bits,                      /* Regions yet untouched by fuzzing */
       *virgin_tmout,                    /* Bits we haven't seen in tmouts   */
@@ -474,6 +475,7 @@ typedef struct afl_state {
 
   u32 queued_paths,                     /* Current number of queued testcases */
       total_queued_paths,               /* Total number of queued testcases */
+      ann_exchanged_queue_files,        /* Up to this value queue files were exchanged */
       queued_variable,                  /* Testcases with variable behavior */
       queued_at_start,                  /* Total number of initial inputs   */
       queued_discovered,                /* Items discovered during this run */
@@ -955,7 +957,8 @@ void   zmq_handle_commands(afl_state_t *);
 void   remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann);
 void   leave_best_annotation_queue_file(afl_state_t * afl, annotation_t * ann);
 void   clean_up_annotation_queue_files(afl_state_t * afl);
-void   adjust_active_annotations(afl_state_t * afl);
+void   adjust_active_annotations(afl_state_t * afl, int);
+void   exchange_new_queue_files(afl_state_t * afl);
 
 /* CmpLog */
 
