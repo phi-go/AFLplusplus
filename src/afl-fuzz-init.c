@@ -2409,7 +2409,7 @@ void clean_up_annotation_queue_files(afl_state_t * afl) {
       switch(el->type) {
         case ANN_MIN:
         case ANN_MAX:
-          leave_best_annotation_queue_file(afl, el);
+          // leave_best_annotation_queue_file(afl, el);
           break;
         case ANN_SET:
           break; // keep all, they are all interesting
@@ -2479,13 +2479,17 @@ static int queue_entry_belongs_to_ann(annotation_t * ann, struct queue_entry * q
   return 0;
 }
 
+void disable_annotation(afl_state_t * afl, annotation_t * ann) {
+    char cmd[4] = "D_AN";
+    write_to_command_pipe(&cmd, sizeof(cmd));
+    write_to_command_pipe(&ann->id, sizeof(ann->id));
+    check_forkserver_response(afl);
+}
+
 void adjust_active_annotations(afl_state_t * afl, int set_all_active) {
   if (get_head(&afl->active_annotations)->next) {
     LIST_FOREACH_CLEAR(&afl->active_annotations, annotation_t, {
-      char cmd[4] = "D_AN";
-      write_to_command_pipe(&cmd, sizeof(cmd));
-      write_to_command_pipe(&el->id, sizeof(el->id));
-      check_forkserver_response(afl);
+      disable_annotation(afl, el);
     });
   }
   if (get_head(&afl->all_annotations)->next) {

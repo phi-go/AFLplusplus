@@ -1115,9 +1115,17 @@ static void __afl_start_forkserver(void) {
   action.sa_sigaction = &sigtrap_handler;
   action.sa_flags = SA_SIGINFO;
   sigaction(SIGTRAP, &action, NULL);
-  if ((put_err_log_fp = fopen("/tmp/fuzz_run/put_err.log", "a")) == NULL) {
-    fprintf(stderr, "Can't open error log file: %s\n", strerror(errno));
+
+  char * put_log_path = getenv("IJON_PUT_LOG_PATH");
+  if (put_log_path == NULL) {
+    fprintf(stderr, "Got no IJON_PUT_LOG_PATH will log to stderr\n");
+  } else {
+    if ((put_err_log_fp = fopen(put_log_path, "a")) == NULL) {
+      fprintf(stderr, "Can't open error log file: %s\n", strerror(errno));
+    } else {
+    }
   }
+  FPRINTF_TO_ERR_FILE("PUT starting up\n");
 
   if (__afl_dictionary_len > 0 && __afl_dictionary) {
 

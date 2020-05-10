@@ -957,6 +957,7 @@ void   zmq_handle_commands(afl_state_t *);
 void   remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann);
 void   leave_best_annotation_queue_file(afl_state_t * afl, annotation_t * ann);
 void   clean_up_annotation_queue_files(afl_state_t * afl);
+void   disable_annotation(afl_state_t * afl, annotation_t * ann);
 void   adjust_active_annotations(afl_state_t * afl, int);
 void   exchange_new_queue_files(afl_state_t * afl);
 

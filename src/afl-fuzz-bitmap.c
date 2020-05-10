@@ -559,7 +559,6 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
               {
                 uint64_t contender = *((uint64_t*)el->shm_addr+1);
                 if (!el->initialized) {
-                  el->initialized = 1;
                   el->cur_best[0] = contender;
                   improvement = 1;
                 } else {
@@ -574,7 +573,6 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
               {
                 uint64_t contender = *((uint64_t*)el->shm_addr+1);
                 if (!el->initialized) {
-                  el->initialized = 1;
                   el->cur_best[0] = contender;
                   improvement = 1;
                 } else {
@@ -596,7 +594,6 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
                       improvement += contender-cur_best;
                   }
                 }
-                el->initialized = 1;
               }
               break;
             default:
@@ -633,6 +630,15 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
           qe->favored = 1;
           ++afl->pending_favored;
           list_append(&el->corresponding_queue_files, qe);
+
+          // if not initialized we are not fuzzing a queue file for this annotation
+          // as this annotation can not have any queue files
+          // we only wanted to get a first value for this annotation which we now found
+          // disable this annotation to minimize runtime overhead
+          if (!el->initialized) {  
+            el->initialized = 1;
+            disable_annotation(afl, el);
+          }
         }
       });
     }
