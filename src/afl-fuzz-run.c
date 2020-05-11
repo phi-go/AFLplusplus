@@ -30,13 +30,37 @@
 
 #include "cmplog.h"
 
+#ifdef PROFILING
+u64 time_spent_working = 0;
+#endif
+
 /* Execute target application, monitoring for timeouts. Return status
    information. The called program will update afl->fsrv->trace_bits. */
 
 fsrv_run_result_t fuzz_run_target(afl_state_t *afl, afl_forkserver_t *fsrv,
                                   u32 timeout) {
 
+#ifdef PROFILING
+  static u64      time_spent_start = 0;
+  struct timespec spec;
+  if (time_spent_start) {
+
+    u64 current;
+    clock_gettime(CLOCK_REALTIME, &spec);
+    current = (spec.tv_sec * 1000000000) + spec.tv_nsec;
+    time_spent_working += (current - time_spent_start);
+
+  }
+
+#endif
+
   fsrv_run_result_t res = afl_fsrv_run_target(fsrv, timeout, &afl->stop_soon);
+
+#ifdef PROFILING
+  clock_gettime(CLOCK_REALTIME, &spec);
+  time_spent_start = (spec.tv_sec * 1000000000) + spec.tv_nsec;
+#endif
+
   // TODO: Don't classify for faults?
   classify_counts(fsrv);
   return res;
@@ -65,18 +89,40 @@ void write_to_testcase(afl_state_t *afl, void *mem, u32 len) {
 
 #endif
 
-  if (unlikely(afl->mutator && afl->mutator->afl_custom_pre_save)) {
+  if (unlikely(afl->custom_mutators_count)) {
 
-    u8 *new_buf = NULL;
+    u8 *    new_buf = NULL;
+    ssize_t new_size = len;
+    void *  new_mem = mem;
 
-    size_t new_size = afl->mutator->afl_custom_pre_save(afl->mutator->data, mem,
-                                                        len, &new_buf);
+    LIST_FOREACH(&afl->custom_mutator_list, struct custom_mutator, {
 
-    if (unlikely(!new_buf))
+      if (el->afl_custom_pre_save) {
+
+        new_size =
+            el->afl_custom_pre_save(el->data, new_mem, new_size, &new_buf);
+
+      }
+
+      new_mem = new_buf;
+
+    });
+
+    if (unlikely(!new_buf && (new_size <= 0))) {
+
       FATAL("Custom_pre_save failed (ret: %lu)", (long unsigned)new_size);
 
-    /* everything as planned. use the new data. */
-    afl_fsrv_write_to_testcase(&afl->fsrv, new_buf, new_size);
+    } else if (likely(new_buf)) {
+
+      /* everything as planned. use the new data. */
+      afl_fsrv_write_to_testcase(&afl->fsrv, new_buf, new_size);
+
+    } else {
+
+      /* custom mutators do not has a custom_pre_save function */
+      afl_fsrv_write_to_testcase(&afl->fsrv, mem, len);
+
+    }
 
   } else {
 
@@ -108,26 +154,33 @@ static void write_with_gap(afl_state_t *afl, void *mem, u32 len, u32 skip_at,
 
     }
 
-    if (fd < 0) PFATAL("Unable to create '%s'", afl->fsrv.out_file);
+    if (fd < 0) { PFATAL("Unable to create '%s'", afl->fsrv.out_file); }
 
-  } else
+  } else {
 
     lseek(fd, 0, SEEK_SET);
 
-  if (skip_at) ck_write(fd, mem, skip_at, afl->fsrv.out_file);
+  }
+
+  if (skip_at) { ck_write(fd, mem, skip_at, afl->fsrv.out_file); }
 
   u8 *memu8 = mem;
-  if (tail_len)
+  if (tail_len) {
+
     ck_write(fd, memu8 + skip_at + skip_len, tail_len, afl->fsrv.out_file);
+
+  }
 
   if (!afl->fsrv.out_file) {
 
-    if (ftruncate(fd, len - skip_len)) PFATAL("ftruncate() failed");
+    if (ftruncate(fd, len - skip_len)) { PFATAL("ftruncate() failed"); }
     lseek(fd, 0, SEEK_SET);
 
-  } else
+  } else {
 
     close(fd);
+
+  }
 
 }
 
@@ -151,9 +204,12 @@ u8 calibrate_case(afl_state_t *afl, struct queue_entry *q, u8 *use_mem,
      trying to calibrate already-added finds. This helps avoid trouble due
      to intermittent latency. */
 
-  if (!from_queue || afl->resuming_fuzz)
+  if (!from_queue || afl->resuming_fuzz) {
+
     use_tmout = MAX(afl->fsrv.exec_tmout + CAL_TMOUT_ADD,
                     afl->fsrv.exec_tmout * CAL_TMOUT_PERC / 100);
+
+  }
 
   ++q->cal_failed;
 
@@ -177,8 +233,13 @@ u8 calibrate_case(afl_state_t *afl, struct queue_entry *q, u8 *use_mem,
 
   }
 
-  if (q->exec_cksum)
+  if (q->exec_cksum) {
+
     memcpy(afl->first_trace, afl->fsrv.trace_bits, afl->fsrv.map_size);
+    u8 hnb = has_new_bits(afl, afl->virgin_bits);
+    if (hnb > new_bits) { new_bits = hnb; }
+
+  }
 
   start_us = get_cur_time_us();
 
@@ -186,8 +247,11 @@ u8 calibrate_case(afl_state_t *afl, struct queue_entry *q, u8 *use_mem,
 
     u32 cksum;
 
-    if (!first_run && !(afl->stage_cur % afl->stats_update_freq))
+    if (!first_run && !(afl->stage_cur % afl->stats_update_freq)) {
+
       show_stats(afl);
+
+    }
 
     write_to_testcase(afl, use_mem, q->len);
 
@@ -196,7 +260,7 @@ u8 calibrate_case(afl_state_t *afl, struct queue_entry *q, u8 *use_mem,
     /* afl->stop_soon is set by the handler for Ctrl+C. When it's pressed,
        we want to bail out quickly. */
 
-    if (afl->stop_soon || fault != afl->crash_mode) goto abort_calibration;
+    if (afl->stop_soon || fault != afl->crash_mode) { goto abort_calibration; }
 
     if (!afl->dumb_mode && !afl->stage_cur &&
         !count_bytes(afl, afl->fsrv.trace_bits)) {
@@ -207,11 +271,10 @@ u8 calibrate_case(afl_state_t *afl, struct queue_entry *q, u8 *use_mem,
     }
 
     cksum = hash32(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
+    u8 hnb = has_new_bits(afl, afl->virgin_bits);
+    if (hnb > new_bits) { new_bits = hnb; }
 
     if (q->exec_cksum != cksum) {
-
-      u8 hnb = has_new_bits(afl, afl->virgin_bits);
-      if (hnb > new_bits) new_bits = hnb;
 
       if (q->exec_cksum) {
 
@@ -220,8 +283,11 @@ u8 calibrate_case(afl_state_t *afl, struct queue_entry *q, u8 *use_mem,
         for (i = 0; i < afl->fsrv.map_size; ++i) {
 
           if (unlikely(!afl->var_bytes[i]) &&
-              unlikely(afl->first_trace[i] != afl->fsrv.trace_bits[i]))
+              unlikely(afl->first_trace[i] != afl->fsrv.trace_bits[i])) {
+
             afl->var_bytes[i] = 1;
+
+          }
 
         }
 
@@ -261,8 +327,11 @@ u8 calibrate_case(afl_state_t *afl, struct queue_entry *q, u8 *use_mem,
      parent. This is a non-critical problem, but something to warn the user
      about. */
 
-  if (!afl->dumb_mode && first_run && !fault && !new_bits)
+  if (!afl->dumb_mode && first_run && !fault && !new_bits) {
+
     fault = FSRV_RUN_NOBITS;
+
+  }
 
 abort_calibration:
 
@@ -292,7 +361,7 @@ abort_calibration:
   afl->stage_cur = old_sc;
   afl->stage_max = old_sm;
 
-  if (!first_run) show_stats(afl);
+  if (!first_run) { show_stats(afl); }
 
   return fault;
 
@@ -307,7 +376,7 @@ void sync_fuzzers(afl_state_t *afl) {
   u32            sync_cnt = 0;
 
   sd = opendir(afl->sync_dir);
-  if (!sd) PFATAL("Unable to open '%s'", afl->sync_dir);
+  if (!sd) { PFATAL("Unable to open '%s'", afl->sync_dir); }
 
   afl->stage_max = afl->stage_cur = 0;
   afl->cur_depth = 0;
@@ -326,8 +395,11 @@ void sync_fuzzers(afl_state_t *afl) {
 
     /* Skip dot files and our own output directory. */
 
-    if (sd_ent->d_name[0] == '.' || !strcmp(afl->sync_id, sd_ent->d_name))
+    if (sd_ent->d_name[0] == '.' || !strcmp(afl->sync_id, sd_ent->d_name)) {
+
       continue;
+
+    }
 
     /* Skip anything that doesn't have a queue/ subdirectory. */
 
@@ -347,9 +419,13 @@ void sync_fuzzers(afl_state_t *afl) {
 
     id_fd = open(qd_synced_path, O_RDWR | O_CREAT, 0600);
 
-    if (id_fd < 0) PFATAL("Unable to create '%s'", qd_synced_path);
+    if (id_fd < 0) { PFATAL("Unable to create '%s'", qd_synced_path); }
 
-    if (read(id_fd, &min_accept, sizeof(u32)) > 0) lseek(id_fd, 0, SEEK_SET);
+    if (read(id_fd, &min_accept, sizeof(u32)) > 0) {
+
+      lseek(id_fd, 0, SEEK_SET);
+
+    }
 
     next_min_accept = min_accept;
 
@@ -372,13 +448,19 @@ void sync_fuzzers(afl_state_t *afl) {
 
       if (qd_ent->d_name[0] == '.' ||
           sscanf(qd_ent->d_name, CASE_PREFIX "%06u", &afl->syncing_case) != 1 ||
-          afl->syncing_case < min_accept)
+          afl->syncing_case < min_accept) {
+
         continue;
+
+      }
 
       /* OK, sounds like a new one. Let's give it a try. */
 
-      if (afl->syncing_case >= next_min_accept)
+      if (afl->syncing_case >= next_min_accept) {
+
         next_min_accept = afl->syncing_case + 1;
+
+      }
 
       path = alloc_printf("%s/%s", qd_path, qd_ent->d_name);
 
@@ -393,7 +475,7 @@ void sync_fuzzers(afl_state_t *afl) {
 
       }
 
-      if (fstat(fd, &st)) PFATAL("fstat() failed");
+      if (fstat(fd, &st)) { PFATAL("fstat() failed"); }
 
       /* Ignore zero-sized or oversized files. */
 
@@ -402,7 +484,7 @@ void sync_fuzzers(afl_state_t *afl) {
         u8  fault;
         u8 *mem = mmap(0, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
 
-        if (mem == MAP_FAILED) PFATAL("Unable to mmap '%s'", path);
+        if (mem == MAP_FAILED) { PFATAL("Unable to mmap '%s'", path); }
 
         /* See what happens. We rely on save_if_interesting() to catch major
            errors and save the test case. */
@@ -411,7 +493,7 @@ void sync_fuzzers(afl_state_t *afl) {
 
         fault = fuzz_run_target(afl, &afl->fsrv, afl->fsrv.exec_tmout);
 
-        if (afl->stop_soon) goto close_sync;
+        if (afl->stop_soon) { goto close_sync; }
 
         afl->syncing_party = sd_ent->d_name;
         afl->queued_imported +=
@@ -420,7 +502,7 @@ void sync_fuzzers(afl_state_t *afl) {
 
         munmap(mem, st.st_size);
 
-        if (!(afl->stage_cur++ % afl->stats_update_freq)) show_stats(afl);
+        if (!(afl->stage_cur++ % afl->stats_update_freq)) { show_stats(afl); }
 
       }
 
@@ -450,8 +532,25 @@ void sync_fuzzers(afl_state_t *afl) {
 u8 trim_case(afl_state_t *afl, struct queue_entry *q, u8 *in_buf) {
 
   /* Custom mutator trimmer */
-  if (afl->mutator && afl->mutator->afl_custom_trim)
-    return trim_case_custom(afl, q, in_buf);
+  if (afl->custom_mutators_count) {
+
+    u8   trimmed_case = 0;
+    bool custom_trimmed = false;
+
+    LIST_FOREACH(&afl->custom_mutator_list, struct custom_mutator, {
+
+      if (el->afl_custom_trim) {
+
+        trimmed_case = trim_case_custom(afl, q, in_buf, el);
+        custom_trimmed = true;
+
+      }
+
+    });
+
+    if (custom_trimmed) return trimmed_case;
+
+  }
 
   u8  needs_write = 0, fault = 0;
   u32 trim_exec = 0;
@@ -464,7 +563,7 @@ u8 trim_case(afl_state_t *afl, struct queue_entry *q, u8 *in_buf) {
      detected, it will still work to some extent, so we don't check for
      this. */
 
-  if (q->len < 5) return 0;
+  if (q->len < 5) { return 0; }
 
   afl->stage_name = afl->stage_name_buf;
   afl->bytes_trim_in += q->len;
@@ -499,7 +598,7 @@ u8 trim_case(afl_state_t *afl, struct queue_entry *q, u8 *in_buf) {
       fault = fuzz_run_target(afl, &afl->fsrv, afl->fsrv.exec_tmout);
       ++afl->trim_execs;
 
-      if (afl->stop_soon || fault == FSRV_RUN_ERROR) goto abort_trimming;
+      if (afl->stop_soon || fault == FSRV_RUN_ERROR) { goto abort_trimming; }
 
       /* Note that we don't keep track of crashes or hangs here; maybe TODO?
        */
@@ -531,13 +630,15 @@ u8 trim_case(afl_state_t *afl, struct queue_entry *q, u8 *in_buf) {
 
         }
 
-      } else
+      } else {
 
         remove_pos += remove_len;
 
+      }
+
       /* Since this can be slow, update the screen every now and then. */
 
-      if (!(trim_exec++ % afl->stats_update_freq)) show_stats(afl);
+      if (!(trim_exec++ % afl->stats_update_freq)) { show_stats(afl); }
       ++afl->stage_cur;
 
     }
@@ -564,7 +665,7 @@ u8 trim_case(afl_state_t *afl, struct queue_entry *q, u8 *in_buf) {
 
     }
 
-    if (fd < 0) PFATAL("Unable to create '%s'", q->fname);
+    if (fd < 0) { PFATAL("Unable to create '%s'", q->fname); }
 
     ck_write(fd, in_buf, q->len, q->fname);
     close(fd);
@@ -595,7 +696,7 @@ u8 common_fuzz_stuff(afl_state_t *afl, u8 *out_buf, u32 len) {
 
     size_t post_len =
         afl->post_handler(afl->post_data, out_buf, len, &post_buf);
-    if (!post_buf || !post_len) return 0;
+    if (!post_buf || !post_len) { return 0; }
     out_buf = post_buf;
     len = post_len;
 
@@ -605,7 +706,7 @@ u8 common_fuzz_stuff(afl_state_t *afl, u8 *out_buf, u32 len) {
 
   fault = fuzz_run_target(afl, &afl->fsrv, afl->fsrv.exec_tmout);
 
-  if (afl->stop_soon) return 1;
+  if (afl->stop_soon) { return 1; }
 
   if (fault == FSRV_RUN_TMOUT) {
 
@@ -616,9 +717,11 @@ u8 common_fuzz_stuff(afl_state_t *afl, u8 *out_buf, u32 len) {
 
     }
 
-  } else
+  } else {
 
     afl->subseq_tmouts = 0;
+
+  }
 
   /* Users can hit us with SIGUSR1 to request the current input
      to be abandoned. */
@@ -636,8 +739,11 @@ u8 common_fuzz_stuff(afl_state_t *afl, u8 *out_buf, u32 len) {
   afl->queued_discovered += save_if_interesting(afl, out_buf, len, fault);
 
   if (!(afl->stage_cur % afl->stats_update_freq) ||
-      afl->stage_cur + 1 == afl->stage_max)
+      afl->stage_cur + 1 == afl->stage_max) {
+
     show_stats(afl);
+
+  }
 
   return 0;
 

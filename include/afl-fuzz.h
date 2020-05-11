@@ -33,7 +33,9 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1
 #endif
+#ifndef _FILE_OFFSET_BITS
 #define _FILE_OFFSET_BITS 64
+#endif
 
 #ifdef __ANDROID__
 #include "android-ashmem.h"
@@ -637,16 +639,15 @@ typedef struct afl_state {
 
   u8 *   ex_buf;
   size_t ex_size;
+  u32    custom_mutators_count;
 
-  /* this is a fixed buffer of size map_size that can be used by any function if they do not call another function */
-  u8 *   map_tmp_buf;
+  list_t custom_mutator_list;
+
+  /* this is a fixed buffer of size map_size that can be used by any function if
+   * they do not call another function */
+  u8 *map_tmp_buf;
 
 } afl_state_t;
-
-/* A global pointer to all instances is needed (for now) for signals to arrive
- */
-
-extern list_t afl_states;
 
 struct custom_mutator {
 
@@ -654,6 +655,7 @@ struct custom_mutator {
   void *      dh;
   u8 *        pre_save_buf;
   size_t      pre_save_size;
+  u8          stacked_custom_prob, stacked_custom;
 
   void *data;                                    /* custom mutator data ptr */
 
@@ -829,20 +831,29 @@ struct custom_mutator {
 
 void afl_state_init(afl_state_t *, uint32_t map_size);
 void afl_state_deinit(afl_state_t *);
+
+/* Set stop_soon flag on all childs, kill all childs */
+void afl_states_stop(void);
+/* Set clear_screen flag on all states */
+void afl_states_clear_screen(void);
+/* Sets the skip flag on all states */
+void afl_states_request_skip(void);
+
 void read_afl_environment(afl_state_t *, char **);
 
 /**** Prototypes ****/
 
 /* Custom mutators */
-void setup_custom_mutator(afl_state_t *);
-void destroy_custom_mutator(afl_state_t *);
-u8   trim_case_custom(afl_state_t *, struct queue_entry *q, u8 *in_buf);
+void setup_custom_mutators(afl_state_t *);
+void destroy_custom_mutators(afl_state_t *);
+u8   trim_case_custom(afl_state_t *, struct queue_entry *q, u8 *in_buf,
+                      struct custom_mutator *mutator);
 
 /* Python */
 #ifdef USE_PYTHON
 
-void load_custom_mutator_py(afl_state_t *, char *);
-void finalize_py_module(void *);
+struct custom_mutator *load_custom_mutator_py(afl_state_t *, char *);
+void                   finalize_py_module(void *);
 
 size_t pre_save_py(void *, u8 *, size_t, u8 **);
 s32    init_trim_py(void *, u8 *, size_t);
@@ -999,7 +1010,7 @@ static inline u32 rand_below(afl_state_t *afl, u32 limit) {
 
 static inline u32 get_rand_seed(afl_state_t *afl) {
 
-  if (unlikely(afl->fixed_seed)) return (u32)afl->init_seed;
+  if (unlikely(afl->fixed_seed)) { return (u32)afl->init_seed; }
   return afl->rand_seed[0];
 
 }
@@ -1010,8 +1021,12 @@ static inline u32 get_rand_seed(afl_state_t *afl) {
 static inline u64 next_p2(u64 val) {
 
   u64 ret = 1;
-  while (val > ret)
+  while (val > ret) {
+
     ret <<= 1;
+
+  }
+
   return ret;
 
 }

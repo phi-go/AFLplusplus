@@ -30,6 +30,29 @@ typedef uint8_t  u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
 
+/* Extended forkserver option values */
+
+/* Reporting errors */
+#define FS_OPT_ERROR 0xf800008f
+#define FS_OPT_GET_ERROR(x) ((x & 0x00ffff00) >> 8)
+#define FS_OPT_SET_ERROR(x) ((x & 0x0000ffff) << 8)
+#define FS_ERROR_MAP_SIZE 1
+#define FS_ERROR_MAP_ADDR 2
+#define FS_ERROR_SHM_OPEN 4
+#define FS_ERROR_SHMAT 8
+#define FS_ERROR_MMAP 16
+
+/* Reporting options */
+#define FS_OPT_ENABLED 0x8f000001
+#define FS_OPT_MAPSIZE 0x40000000
+#define FS_OPT_SNAPSHOT 0x20000000
+#define FS_OPT_AUTODICT 0x10000000
+// FS_OPT_MAX_MAPSIZE is 8388608 = 0x800000 = 2^23 = 1 << 22
+#define FS_OPT_MAX_MAPSIZE ((0x00fffffe >> 1) + 1)
+#define FS_OPT_GET_MAPSIZE(x) (((x & 0x00fffffe) >> 1) + 1)
+#define FS_OPT_SET_MAPSIZE(x) \
+  (x <= 1 || x > FS_OPT_MAX_MAPSIZE ? 0 : ((x - 1) << 1))
+
 /*
 
    Ugh. There is an unintended compiler / glibc #include glitch caused by
@@ -66,6 +89,7 @@ typedef int64_t s64;
     _a < _b ? _a : _b;      \
                             \
   })
+
 #define MAX(a, b)           \
   ({                        \
                             \
@@ -74,6 +98,7 @@ typedef int64_t s64;
     _a > _b ? _a : _b;      \
                             \
   })
+
 #endif                                                              /* !MIN */
 
 #define SWAP16(_x)                    \
@@ -108,7 +133,7 @@ typedef int64_t s64;
   })
 
 #ifdef AFL_LLVM_PASS
-#if defined(__linux__)
+#if defined(__linux__) || !defined(__ANDROID__)
 #define AFL_SR(s) (srandom(s))
 #define AFL_R(x) (random() % (x))
 #else
@@ -116,7 +141,7 @@ typedef int64_t s64;
 #define AFL_R(x) (arc4random_uniform(x))
 #endif
 #else
-#if defined(__linux__)
+#if defined(__linux__) || !defined(__ANDROID__)
 #define SR(s) (srandom(s))
 #define R(x) (random() % (x))
 #else
@@ -131,8 +156,12 @@ typedef int64_t s64;
 #define MEM_BARRIER() __asm__ volatile("" ::: "memory")
 
 #if __GNUC__ < 6
+#ifndef likely
 #define likely(_x) (_x)
+#endif
+#ifndef unlikely
 #define unlikely(_x) (_x)
+#endif
 #else
 #ifndef likely
 #define likely(_x) __builtin_expect(!!(_x), 1)

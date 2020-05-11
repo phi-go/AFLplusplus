@@ -85,7 +85,7 @@
 
   (3) partially via AFL_CODE_START/AFL_CODE_END
 
-  (4) Only for LLVM >= 9 and not all targets compile
+  (4) Only for LLVM >= 11 and not all targets compile
 
   (5) upcoming, development in the branch
 
@@ -137,7 +137,7 @@ afl++ has many build options.
 The easiest is to build and install everything:
 
 ```shell
-$ sudo apt install build-essential libtool-bin python3 automake bison libglib2.0-dev libpixman-1-dev clang python-setuptools
+$ sudo apt install build-essential libtool-bin python3 automake flex bison libglib2.0-dev libpixman-1-dev clang python-setuptools llvm
 $ make distrib
 $ sudo make install
 ```
@@ -160,7 +160,8 @@ These build targets exist:
 * distrib: everything (for both binary-only and source code fuzzing)
 * man: creates simple man pages from the help option of the programs
 * install: installs everything you have compiled with the build options above
-* clean: cleans everything. for qemu_mode and unicorn_mode it means it deletes all downloads as well
+* clean: cleans everything compiled, not downloads (unless not on a checkout)
+* deepclean: cleans everything including downloads
 * code-format: format the code, do this before you commit and send a PR please!
 * tests: runs test cases to ensure that all features are still working as they should
 * unit: perform unit tests (based on cmocka)

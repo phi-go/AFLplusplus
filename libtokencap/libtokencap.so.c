@@ -45,7 +45,9 @@
 #elif defined __FreeBSD__ || defined __OpenBSD__ || defined __NetBSD__
 #include <sys/types.h>
 #include <sys/sysctl.h>
+#if !defined __NetBSD__
 #include <sys/user.h>
+#endif
 #include <sys/mman.h>
 #endif
 
@@ -274,7 +276,8 @@ static void __tokencap_dump(const u8 *ptr, size_t len, u8 is_text) {
         pos += 4;
         break;
 
-      default: buf[pos++] = ptr[i];
+      default:
+        buf[pos++] = ptr[i];
 
     }
 

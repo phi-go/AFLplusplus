@@ -32,6 +32,7 @@
 #include <stdbool.h>
 
 #include "types.h"
+
 typedef struct afl_forkserver {
 
   /* a program that includes afl-forkserver needs to define these */
@@ -42,6 +43,7 @@ typedef struct afl_forkserver {
 
   s32 fsrv_pid,                         /* PID of the fork server           */
       child_pid,                        /* PID of the fuzzed program        */
+      child_status,                     /* waitpid result for the child     */
       out_dir_fd;                       /* FD of the lock file              */
 
   s32 out_fd,                           /* Persistent fd for fsrv->out_file */

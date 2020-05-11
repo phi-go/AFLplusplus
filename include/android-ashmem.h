@@ -40,6 +40,7 @@
 #define shmdt bionic_shmdt
 #define shmget bionic_shmget
 #endif
+
 #include <sys/shm.h>
 #undef shmat
 #undef shmctl
@@ -105,7 +106,7 @@ static inline void *shmat(int __shmid, const void *__shmaddr, int __shmflg) {
 
 }
 
-#endif /* __ANDROID__ */
+#endif                                                       /* __ANDROID__ */
 
 #endif
 

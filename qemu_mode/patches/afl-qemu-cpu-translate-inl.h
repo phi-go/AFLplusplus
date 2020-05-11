@@ -35,7 +35,7 @@
 #include "tcg.h"
 #include "tcg-op.h"
 
-#if TCG_TARGET_LONG_BITS == 64
+#if TCG_TARGET_REG_BITS == 64
 #define _DEFAULT_MO MO_64
 #else
 #define _DEFAULT_MO MO_32
@@ -55,11 +55,20 @@ static void afl_gen_compcov(target_ulong cur_loc, TCGv arg1, TCGv arg2,
 
     switch (ot & MO_SIZE) {
 
-      case MO_64: gen_helper_afl_cmplog_64(cur_loc_v, arg1, arg2); break;
-      case MO_32: gen_helper_afl_cmplog_32(cur_loc_v, arg1, arg2); break;
-      case MO_16: gen_helper_afl_cmplog_16(cur_loc_v, arg1, arg2); break;
-      case MO_8: gen_helper_afl_cmplog_8(cur_loc_v, arg1, arg2); break;
-      default: break;
+      case MO_64:
+        gen_helper_afl_cmplog_64(cur_loc_v, arg1, arg2);
+        break;
+      case MO_32:
+        gen_helper_afl_cmplog_32(cur_loc_v, arg1, arg2);
+        break;
+      case MO_16:
+        gen_helper_afl_cmplog_16(cur_loc_v, arg1, arg2);
+        break;
+      case MO_8:
+        gen_helper_afl_cmplog_8(cur_loc_v, arg1, arg2);
+        break;
+      default:
+        break;
 
     }
 
@@ -78,10 +87,17 @@ static void afl_gen_compcov(target_ulong cur_loc, TCGv arg1, TCGv arg2,
 
     switch (ot & MO_SIZE) {
 
-      case MO_64: gen_helper_afl_compcov_64(cur_loc_v, arg1, arg2); break;
-      case MO_32: gen_helper_afl_compcov_32(cur_loc_v, arg1, arg2); break;
-      case MO_16: gen_helper_afl_compcov_16(cur_loc_v, arg1, arg2); break;
-      default: break;
+      case MO_64:
+        gen_helper_afl_compcov_64(cur_loc_v, arg1, arg2);
+        break;
+      case MO_32:
+        gen_helper_afl_compcov_32(cur_loc_v, arg1, arg2);
+        break;
+      case MO_16:
+        gen_helper_afl_compcov_16(cur_loc_v, arg1, arg2);
+        break;
+      default:
+        break;
 
     }
 

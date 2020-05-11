@@ -66,7 +66,6 @@ static list_t shm_list = {.element_prealloc_count = 0};
 
 void afl_shm_deinit(sharedmem_t *shm) {
 
-  // TODO: clang reports a potential UAF in this function/makro(?)
   list_remove(&shm_list, shm);
 
 #ifdef USEMMAP
@@ -86,7 +85,7 @@ void afl_shm_deinit(sharedmem_t *shm) {
 
 #else
   shmctl(shm->shm_id, IPC_RMID, NULL);
-  if (shm->cmplog_mode) shmctl(shm->cmplog_shm_id, IPC_RMID, NULL);
+  if (shm->cmplog_mode) { shmctl(shm->cmplog_shm_id, IPC_RMID, NULL); }
 #endif
 
   shm->map = NULL;
@@ -128,12 +127,12 @@ u8 *afl_shm_init(sharedmem_t *shm, size_t map_size, unsigned char dumb_mode) {
   }
 
   /* map the shared memory segment to the address space of the process */
-  shm->map = mmap(0, map_size, PROT_READ | PROT_WRITE, MAP_SHARED,
-                  map_size->g_shm_fd, 0);
-  if (map_size->map == MAP_FAILED) {
+  shm->map =
+      mmap(0, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm->g_shm_fd, 0);
+  if (shm->map == MAP_FAILED) {
 
-    close(map_size->g_shm_fd);
-    map_size->g_shm_fd = -1;
+    close(shm->g_shm_fd);
+    shm->g_shm_fd = -1;
     PFATAL("mmap() failed");
 
   }
@@ -152,14 +151,14 @@ u8 *afl_shm_init(sharedmem_t *shm, size_t map_size, unsigned char dumb_mode) {
 
   shm->shm_id = shmget(IPC_PRIVATE, map_size, IPC_CREAT | IPC_EXCL | 0600);
 
-  if (shm->shm_id < 0) PFATAL("shmget() failed");
+  if (shm->shm_id < 0) { PFATAL("shmget() failed"); }
 
   if (shm->cmplog_mode) {
 
     shm->cmplog_shm_id = shmget(IPC_PRIVATE, sizeof(struct cmp_map),
                                 IPC_CREAT | IPC_EXCL | 0600);
 
-    if (shm->cmplog_shm_id < 0) PFATAL("shmget() failed");
+    if (shm->cmplog_shm_id < 0) { PFATAL("shmget() failed"); }
 
   }
 
@@ -170,7 +169,7 @@ u8 *afl_shm_init(sharedmem_t *shm, size_t map_size, unsigned char dumb_mode) {
      fork server commands. This should be replaced with better auto-detection
      later on, perhaps? */
 
-  if (!dumb_mode) setenv(SHM_ENV_VAR, shm_str, 1);
+  if (!dumb_mode) { setenv(SHM_ENV_VAR, shm_str, 1); }
 
   ck_free(shm_str);
 
@@ -178,7 +177,7 @@ u8 *afl_shm_init(sharedmem_t *shm, size_t map_size, unsigned char dumb_mode) {
 
     shm_str = alloc_printf("%d", shm->cmplog_shm_id);
 
-    if (!dumb_mode) setenv(CMPLOG_SHM_ENV_VAR, shm_str, 1);
+    if (!dumb_mode) { setenv(CMPLOG_SHM_ENV_VAR, shm_str, 1); }
 
     ck_free(shm_str);
 
@@ -186,13 +185,17 @@ u8 *afl_shm_init(sharedmem_t *shm, size_t map_size, unsigned char dumb_mode) {
 
   shm->map = shmat(shm->shm_id, NULL, 0);
 
-  if (shm->map == (void *)-1 || !shm->map) PFATAL("shmat() failed");
+  if (shm->map == (void *)-1 || !shm->map) { PFATAL("shmat() failed"); }
 
   if (shm->cmplog_mode) {
 
     shm->cmp_map = shmat(shm->cmplog_shm_id, NULL, 0);
 
-    if (shm->cmp_map == (void *)-1 || !shm->cmp_map) PFATAL("shmat() failed");
+    if (shm->cmp_map == (void *)-1 || !shm->cmp_map) {
+
+      PFATAL("shmat() failed");
+
+    }
 
   }
 

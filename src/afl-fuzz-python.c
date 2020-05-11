@@ -71,7 +71,7 @@ static size_t fuzz_py(void *py_mutator, u8 *buf, size_t buf_size, u8 **out_buf,
 
   PyTuple_SetItem(py_args, 1, py_value);
 
-  /* max_size */
+/* max_size */
 #if PY_MAJOR_VERSION >= 3
   py_value = PyLong_FromLong(max_size);
 #else
@@ -111,10 +111,10 @@ static size_t fuzz_py(void *py_mutator, u8 *buf, size_t buf_size, u8 **out_buf,
 
 static py_mutator_t *init_py_module(afl_state_t *afl, u8 *module_name) {
 
-  if (!module_name) return NULL;
+  if (!module_name) { return NULL; }
 
   py_mutator_t *py = calloc(1, sizeof(py_mutator_t));
-  if (!py) PFATAL("Could not allocate memory for python mutator!");
+  if (!py) { PFATAL("Could not allocate memory for python mutator!"); }
 
   Py_Initialize();
 
@@ -160,12 +160,12 @@ static py_mutator_t *init_py_module(afl_state_t *afl, u8 *module_name) {
         if (py_idx == PY_FUNC_PRE_SAVE) {
 
           // Implenting the pre_save API is optional for now
-          if (PyErr_Occurred()) PyErr_Print();
+          if (PyErr_Occurred()) { PyErr_Print(); }
 
         } else if (py_idx >= PY_FUNC_INIT_TRIM && py_idx <= PY_FUNC_TRIM) {
 
           // Implementing the trim API is optional for now
-          if (PyErr_Occurred()) PyErr_Print();
+          if (PyErr_Occurred()) { PyErr_Print(); }
           py_notrim = 1;
 
         } else if ((py_idx >= PY_FUNC_HAVOC_MUTATION) &&
@@ -173,11 +173,11 @@ static py_mutator_t *init_py_module(afl_state_t *afl, u8 *module_name) {
                    (py_idx <= PY_FUNC_QUEUE_NEW_ENTRY)) {
 
           // Implenting the havoc and queue API is optional for now
-          if (PyErr_Occurred()) PyErr_Print();
+          if (PyErr_Occurred()) { PyErr_Print(); }
 
         } else {
 
-          if (PyErr_Occurred()) PyErr_Print();
+          if (PyErr_Occurred()) { PyErr_Print(); }
           fprintf(stderr,
                   "Cannot find/call function with index %d in external "
                   "Python module.\n",
@@ -222,8 +222,11 @@ void finalize_py_module(void *py_mutator) {
     deinit_py(py_mutator);
 
     u32 i;
-    for (i = 0; i < PY_FUNC_COUNT; ++i)
+    for (i = 0; i < PY_FUNC_COUNT; ++i) {
+
       Py_XDECREF(py->py_functions[i]);
+
+    }
 
     Py_DECREF(py->py_module);
 
@@ -292,58 +295,84 @@ void deinit_py(void *py_mutator) {
 
 }
 
-void load_custom_mutator_py(afl_state_t *afl, char *module_name) {
+struct custom_mutator *load_custom_mutator_py(afl_state_t *afl,
+                                              char *       module_name) {
 
-  afl->mutator = ck_alloc(sizeof(struct custom_mutator));
-  afl->mutator->pre_save_buf = NULL;
-  afl->mutator->pre_save_size = 0;
+  struct custom_mutator *mutator;
 
-  afl->mutator->name = module_name;
+  mutator = ck_alloc(sizeof(struct custom_mutator));
+  mutator->pre_save_buf = NULL;
+  mutator->pre_save_size = 0;
+
+  mutator->name = module_name;
   ACTF("Loading Python mutator library from '%s'...", module_name);
 
   py_mutator_t *py_mutator;
   py_mutator = init_py_module(afl, module_name);
-  afl->mutator->data = py_mutator;
+  mutator->data = py_mutator;
   if (!py_mutator) { FATAL("Failed to load python mutator."); }
 
   PyObject **py_functions = py_mutator->py_functions;
 
-  if (py_functions[PY_FUNC_INIT]) afl->mutator->afl_custom_init = unsupported;
+  if (py_functions[PY_FUNC_INIT]) { mutator->afl_custom_init = unsupported; }
 
-  if (py_functions[PY_FUNC_DEINIT]) afl->mutator->afl_custom_deinit = deinit_py;
+  if (py_functions[PY_FUNC_DEINIT]) { mutator->afl_custom_deinit = deinit_py; }
 
   /* "afl_custom_fuzz" should not be NULL, but the interface of Python mutator
      is quite different from the custom mutator. */
-  afl->mutator->afl_custom_fuzz = fuzz_py;
+  mutator->afl_custom_fuzz = fuzz_py;
 
-  if (py_functions[PY_FUNC_PRE_SAVE])
-    afl->mutator->afl_custom_pre_save = pre_save_py;
+  if (py_functions[PY_FUNC_PRE_SAVE]) {
 
-  if (py_functions[PY_FUNC_INIT_TRIM])
-    afl->mutator->afl_custom_init_trim = init_trim_py;
+    mutator->afl_custom_pre_save = pre_save_py;
 
-  if (py_functions[PY_FUNC_POST_TRIM])
-    afl->mutator->afl_custom_post_trim = post_trim_py;
+  }
 
-  if (py_functions[PY_FUNC_TRIM]) afl->mutator->afl_custom_trim = trim_py;
+  if (py_functions[PY_FUNC_INIT_TRIM]) {
 
-  if (py_functions[PY_FUNC_HAVOC_MUTATION])
-    afl->mutator->afl_custom_havoc_mutation = havoc_mutation_py;
+    mutator->afl_custom_init_trim = init_trim_py;
 
-  if (py_functions[PY_FUNC_HAVOC_MUTATION_PROBABILITY])
-    afl->mutator->afl_custom_havoc_mutation_probability =
+  }
+
+  if (py_functions[PY_FUNC_POST_TRIM]) {
+
+    mutator->afl_custom_post_trim = post_trim_py;
+
+  }
+
+  if (py_functions[PY_FUNC_TRIM]) { mutator->afl_custom_trim = trim_py; }
+
+  if (py_functions[PY_FUNC_HAVOC_MUTATION]) {
+
+    mutator->afl_custom_havoc_mutation = havoc_mutation_py;
+
+  }
+
+  if (py_functions[PY_FUNC_HAVOC_MUTATION_PROBABILITY]) {
+
+    mutator->afl_custom_havoc_mutation_probability =
         havoc_mutation_probability_py;
 
-  if (py_functions[PY_FUNC_QUEUE_GET])
-    afl->mutator->afl_custom_queue_get = queue_get_py;
+  }
 
-  if (py_functions[PY_FUNC_QUEUE_NEW_ENTRY])
-    afl->mutator->afl_custom_queue_new_entry = queue_new_entry_py;
+  if (py_functions[PY_FUNC_QUEUE_GET]) {
+
+    mutator->afl_custom_queue_get = queue_get_py;
+
+  }
+
+  if (py_functions[PY_FUNC_QUEUE_NEW_ENTRY]) {
+
+    mutator->afl_custom_queue_new_entry = queue_new_entry_py;
+
+  }
 
   OKF("Python mutator '%s' installed successfully.", module_name);
 
   /* Initialize the custom mutator */
   init_py(afl, py_mutator, rand_below(afl, 0xFFFFFFFF));
+
+  return mutator;
 
 }
 
@@ -513,7 +542,7 @@ size_t havoc_mutation_py(void *py_mutator, u8 *buf, size_t buf_size,
 
   PyTuple_SetItem(py_args, 0, py_value);
 
-  /* max_size */
+/* max_size */
 #if PY_MAJOR_VERSION >= 3
   py_value = PyLong_FromLong(max_size);
 #else
@@ -595,7 +624,7 @@ u8 queue_get_py(void *py_mutator, const u8 *filename) {
 
   py_args = PyTuple_New(1);
 
-  // File name
+// File name
 #if PY_MAJOR_VERSION >= 3
   py_value = PyUnicode_FromString(filename);
 #else
@@ -645,7 +674,7 @@ void queue_new_entry_py(void *py_mutator, const u8 *filename_new_queue,
 
   py_args = PyTuple_New(2);
 
-  // New queue
+// New queue
 #if PY_MAJOR_VERSION >= 3
   py_value = PyUnicode_FromString(filename_new_queue);
 #else

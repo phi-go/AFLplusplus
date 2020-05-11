@@ -83,6 +83,13 @@ if [ ! -d "/usr/include/glib-2.0/" -a ! -d "/usr/local/include/glib-2.0/" ]; the
 
 fi
 
+if [ ! -d "/usr/include/pixman-1/" -a ! -d "/usr/local/include/pixman-1/" ]; then
+
+  echo "[-] Error: devel version of 'pixman-1' not found, please install first."
+  PREREQ_NOTFOUND=1
+
+fi
+
 if echo "$CC" | grep -qF /afl-; then
 
   echo "[-] Error: do not use afl-gcc or afl-clang to compile this tool."
@@ -156,6 +163,8 @@ fi
 
 cd qemu-$VERSION || exit 1
 
+echo Building for CPU target $CPU_TARGET
+
 echo "[*] Applying patches..."
 
 patch -p1 <../patches/elfload.diff || exit 1
@@ -181,6 +190,7 @@ echo "[+] Patching done."
 
 if [ "$STATIC" = "1" ]; then
 
+  echo Building STATIC binary
   ./configure --extra-cflags="-O3 -ggdb -DAFL_QEMU_STATIC_BUILD=1" \
      --disable-bsd-user --disable-guest-agent --disable-strip --disable-werror \
 	  --disable-gcrypt --disable-debug-info --disable-debug-tcg --disable-tcg-interpreter \
@@ -230,7 +240,7 @@ if [ "$ORIG_CPU_TARGET" = "" ]; then
 
   make >/dev/null || exit 1
 
-  gcc test-instr.c -o test-instr || exit 1
+  cc test-instr.c -o test-instr || exit 1
 
   unset AFL_INST_RATIO
   export ASAN_OPTIONS=detect_leaks=0
