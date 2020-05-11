@@ -855,6 +855,8 @@ void show_stats(afl_state_t *afl) {
 
     SAYF("\r");
 
+  }
+
   /* annotations */
   SAYF(SET_G1 "\n" bSTG bVR bH bSTOP            cCYA
        " annotations " bSTG bH20 bH10 bH5 bH2 bH bHT bH20 bH2 bH bRT);
