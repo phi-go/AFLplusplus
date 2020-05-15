@@ -2509,7 +2509,10 @@ abandon_entry:
 
     --afl->pending_not_fuzzed;
     afl->queue_cur->was_fuzzed = 1;
-    if (afl->queue_cur->favored && afl->pending_favored > 0) { --afl->pending_favored; } // dont go below zero
+    if (afl->queue_cur->favored && afl->pending_favored > 0) {
+      afl->queue_cur->favored = 0;
+      --afl->pending_favored;
+    }
 
   }
 
