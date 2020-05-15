@@ -2469,6 +2469,16 @@ static void __zmq_bb_req(afl_state_t * afl) {
   z_send(&bb_content, req.size, 0);
 }
 
+// static void __zmq_resolve_addr(afl_state_t * afl) {
+//   void * addr;
+//   Z_READ(&addr, sizeof(addr));
+
+//   // send bb req to frk_server
+//   char cmd[4] = "RADR";
+//   write_to_command_pipe(&cmd, 4);
+//   write_to_command_pipe(&addr, sizeof(addr));
+// }
+
 #define MAX_INSTRUCTION_SIZE 16
 
 static void __zmq_annotation_req(afl_state_t * afl) {
@@ -2705,6 +2715,8 @@ void zmq_handle_commands(afl_state_t * afl) {
       }
       if (strncmp("BB_R", msg_type, MSG_SIZE) == 0) {
         __zmq_bb_req(afl);
+      // } else if (strncmp("RADR", msg_type, MSG_SIZE) == 0) {
+      //   __zmq_resolve_addr(afl);
       } else if (strncmp("EANR", msg_type, MSG_SIZE) == 0) {
         __zmq_annotation_req(afl);
       } else if (strncmp("DANR", msg_type, MSG_SIZE) == 0) {

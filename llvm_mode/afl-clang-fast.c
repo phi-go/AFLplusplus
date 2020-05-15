@@ -564,6 +564,11 @@ static void edit_params(u32 argc, char **argv, char **envp) {
 
 #endif
 
+  // cc_params[cc_par_cnt++] = "-rdynamic";
+  // // cc_params[cc_par_cnt++] = "-Wl,-E";
+  // cc_params[cc_par_cnt++] = "-fno-omit-frame-pointer";
+  // cc_params[cc_par_cnt++] = "-lunwind";
+
   cc_params[cc_par_cnt] = NULL;
 
 }
