@@ -441,8 +441,6 @@ static void edit_params(u32 argc, char **argv, char **envp) {
 
   }
 
-  cc_params[cc_par_cnt++] = "-mno-avx -mno-avx2";
-
   if (getenv("AFL_NO_BUILTIN") || getenv("AFL_LLVM_LAF_TRANSFORM_COMPARES") ||
       getenv("LAF_TRANSFORM_COMPARES") ||
       (lto_mode && (getenv("AFL_LLVM_LTO_AUTODICTIONARY") ||
