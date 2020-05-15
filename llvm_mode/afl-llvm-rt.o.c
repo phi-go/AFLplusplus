@@ -495,7 +495,7 @@ struct BBReq {
 #define ANN_BYTE_CODE(X) \
   \
   X(START_VAL) \
-  X(VAL_IMM) X(VAL_REG) X(VAL_MEM) X(VAL_PTR) \
+  X(VAL_IMM) X(VAL_REG) X(VAL_MEM) X(VAL_PTR) X(DISP_NEG) X(DISP_POS) \
   X(END_VAL) \
   \
   X(START_REG) \
@@ -530,7 +530,7 @@ struct BBReq {
   X(END_REG) \
   \
   X(START_FUNC) \
-  X(CALC_ABS) X(CALC_SUB) X(CALC_HAMMING) \
+  X(CALC_ABS) X(CALC_SUB) X(CALC_HAMMING) X(CALC_HAMMING_FOR) \
   X(END_FUNC) \
   \
   X(START_GOAL) \
@@ -605,7 +605,7 @@ typedef struct pos_actions {
 static annotation_t * annotations_map = NULL;
 static pos_actions_t * pos_actions_map = NULL;
 
-static __thread unsigned int single_step_size = 0;
+static __thread uint8_t * single_step_start_pos = NULL;
 
 static void set_breakpoint(action_t * action, int quiet) {
   if (!(*action->pos == 0xCC || *action->pos == (uint8_t)action->instruction_bytes[0])) {
@@ -623,6 +623,15 @@ static void set_breakpoint(action_t * action, int quiet) {
   *(uint8_t*)action->pos = 0xcc;
   assert(mprotect((void*)base, 4096 , PROT_READ|PROT_EXEC )==0);
 }
+
+static void set_breakpoint_at_addr(uint8_t * addr) {
+  uint8_t* base = addr - ((uint64_t)addr)%4096;
+  // TODO find initial protections to restore them
+  assert(mprotect((void*)base, 4096 , PROT_READ|PROT_WRITE|PROT_EXEC )==0);
+  *(uint8_t*)addr = 0xcc;
+  assert(mprotect((void*)base, 4096 , PROT_READ|PROT_EXEC )==0);
+}
+
 
 static void remove_breakpoint(action_t * action, int quiet) {
   if (!(*action->pos == 0xcc || *action->pos == (uint8_t)action->instruction_bytes[0])) {
@@ -752,7 +761,7 @@ static uint64_t bc_get_reg(annotation_byte_code_t reg, ucontext_t * ctx, int all
     case GS:
       return (ctx->uc_mcontext.gregs[REG_CSGSFS] >> 32) & 0xFFFF;
     default:
-      FPRINTF_TO_ERR_FILE("unhandled reg: %s(%d)\n", bc_str(reg), reg);
+      FPRINTF_TO_ERR_FILE("ERROR unhandled reg: %s(%d)\n", bc_str(reg), reg);
       _exit(1);
   }
 }
@@ -761,50 +770,85 @@ static uint64_t bc_get_ptr(annotation_byte_code_t segment_reg,
                     annotation_byte_code_t base_reg,
                     annotation_byte_code_t index_reg,
                     uint64_t scale,
+                    annotation_byte_code_t disp_type,
                     uint64_t displacement,
-                    uint32_t size,
+                    uint64_t size,
                     ucontext_t * ctx,
                     int verbose) {
   uint64_t segment = bc_get_reg(segment_reg, ctx, /* allow no_reg */ 1, verbose);
   uint64_t base = bc_get_reg(base_reg, ctx, /* allow no_reg */ 1, verbose);
   uint64_t index = bc_get_reg(index_reg, ctx, /* allow no_reg */ 1, verbose);
-  uint64_t addr = segment + base + index*scale + displacement;
-  if (verbose) { FPRINTF_TO_ERR_FILE("addr: %p + %p + %d*%d + %p = %p (%d)\n",
+  uint64_t addr = 0;
+  if (disp_type == DISP_POS) {
+    addr = segment + base + index*scale + displacement;
+  } else if (disp_type == DISP_NEG) {
+    addr = segment + base + index*scale + (int32_t)displacement;
+  } else {
+    FPRINTF_TO_ERR_FILE("ERROR invalid disp type %d", disp_type);
+    _exit(1);
+  }
+  if (verbose) { FPRINTF_TO_ERR_FILE("addr: %p + %p + %d*%d + %d = %p size:(%d)\n",
                  segment, base, index, scale, displacement, addr, size); }
   return addr;
+}
+
+static bool is_pointer_valid(uint64_t p, int verbose) {
+    /* get the page size */
+    size_t page_size = sysconf(_SC_PAGESIZE);
+    /* find the address of the page that contains p */
+    void *base = (void *)((((size_t)p) / page_size) * page_size);
+    /* call msync, if it returns non-zero, return false */
+    if (msync(base, page_size, MS_ASYNC) == 0) {
+      if (verbose) { FPRINTF_TO_ERR_FILE("valid ptr: %p\n", p); }
+      return 1;
+    } else {
+      if (errno == ENOMEM) {
+        if (verbose) { FPRINTF_TO_ERR_FILE("invalid ptr: %p\n", p); }
+        return 0;
+      } else {
+        FPRINTF_TO_ERR_FILE("ERROR during msync of %p: %s\n", p, strerror(errno));
+        _exit(1);
+      }
+    }
 }
   
 static uint64_t bc_get_mem(annotation_byte_code_t segment_reg,
                     annotation_byte_code_t base_reg,
                     annotation_byte_code_t index_reg,
                     uint64_t scale,
+                    annotation_byte_code_t disp_type,
                     uint64_t displacement,
-                    uint32_t size,
+                    uint64_t size,
                     ucontext_t * ctx,
                     int verbose) {
-  uint64_t addr = bc_get_ptr(segment_reg, base_reg, index_reg, scale, displacement, size, ctx, verbose);
-  uint64_t res = 0;
-  switch(size) {
-    case 8:
-      res = *(uint64_t*)addr;
-      break;
-    case 4:
-      res = *(uint32_t*)addr;
-      break;
-    case 2:
-      res = *(uint16_t*)addr;
-      break;
-    case 1:
-      res = *(uint8_t*)addr;
-      break;
+  uint64_t addr = bc_get_ptr(segment_reg, base_reg, index_reg, scale, disp_type, displacement, size, ctx, verbose);
+  if (is_pointer_valid(addr, verbose)) {
+    uint64_t res = 0;
+    switch(size) {
+      case 8:
+        res = *(uint64_t*)addr;
+        break;
+      case 4:
+        res = *(uint32_t*)addr;
+        break;
+      case 2:
+        res = *(uint16_t*)addr;
+        break;
+      case 1:
+        res = *(uint8_t*)addr;
+        break;
+    }
+    if (verbose) { FPRINTF_TO_ERR_FILE("mem: %x %d @ addr: %p (%d)\n", res, res, addr, size); }
+    return res;
+  } else {
+    FPRINTF_TO_ERR_FILE("ptr is invalid can't read memory: %p\n", addr);
+    return 0;
   }
-  if (verbose) { FPRINTF_TO_ERR_FILE("mem: %x %d @ addr: %p (%d)\n", res, res, addr, size); }
-  return res;
 }
 
 static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_len,
                      ucontext_t * ctx, action_t * action, int verbose) {
-  int i = 0;
+  uint64_t i = 0;
   uint64_t stack[BC_MAX_STACK];
   uint64_t * stack_ptr = stack;
   if (verbose) { FPRINTF_TO_ERR_FILE("\nexec(%d): \n", byte_code_len); }
@@ -823,10 +867,11 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
           annotation_byte_code_t segment_reg = byte_code[i++];
           annotation_byte_code_t base_reg = byte_code[i++];
           annotation_byte_code_t index_reg = byte_code[i++];
-          annotation_byte_code_t scale = byte_code[i++];
-          annotation_byte_code_t displacement = byte_code[i++];
-          annotation_byte_code_t size = byte_code[i++];
-          BC_PUSH(bc_get_mem(segment_reg, base_reg, index_reg, scale, displacement, size,
+          uint64_t scale = byte_code[i++];
+          annotation_byte_code_t disp_type = byte_code[i++];
+          uint64_t displacement = byte_code[i++];
+          uint64_t size = byte_code[i++];
+          BC_PUSH(bc_get_mem(segment_reg, base_reg, index_reg, scale, disp_type, displacement, size,
                              ctx, verbose));
         }
         break;
@@ -835,10 +880,11 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
           annotation_byte_code_t segment_reg = byte_code[i++];
           annotation_byte_code_t base_reg = byte_code[i++];
           annotation_byte_code_t index_reg = byte_code[i++];
-          annotation_byte_code_t scale = byte_code[i++];
-          annotation_byte_code_t displacement = byte_code[i++];
-          annotation_byte_code_t size = byte_code[i++];
-          BC_PUSH(bc_get_ptr(segment_reg, base_reg, index_reg, scale, displacement, size,
+          uint64_t scale = byte_code[i++];
+          annotation_byte_code_t disp_type = byte_code[i++];
+          uint64_t displacement = byte_code[i++];
+          uint64_t size = byte_code[i++];
+          BC_PUSH(bc_get_ptr(segment_reg, base_reg, index_reg, scale, disp_type, displacement, size,
                              ctx, verbose));
         }
         break;
@@ -864,6 +910,24 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
           BC_POP(a);
           BC_POP(b);
           BC_PUSH(__builtin_popcountll(a ^ b));
+        }
+        break;
+      case CALC_HAMMING_FOR:
+        {
+          uint64_t size, a_ptr, b_ptr, total = 0;
+          BC_POP(size);
+          BC_POP(a_ptr);
+          BC_POP(b_ptr);
+          if (verbose) { FPRINTF_TO_ERR_FILE("size: %d\n", size); }
+          if (is_pointer_valid(a_ptr, verbose) && is_pointer_valid(b_ptr, verbose)) {
+            for (int i = 0; i < size; i++) {
+              int a_val = *(uint8_t*)(a_ptr+i);
+              int b_val = *(uint8_t*)(b_ptr+i);
+              total += __builtin_popcount(a_val ^ b_val);
+              if (verbose) { FPRINTF_TO_ERR_FILE("pos: %p %x ^ %x -> %d\n", i, a_val, b_val, total); }
+            }
+          }
+          BC_PUSH(total);
         }
         break;
       case GOAL_MIN:
@@ -942,14 +1006,13 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
 
 static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
 {
-  // FPRINTF_TO_ERR_FILE("oh boy\n");
   assert(signo == SIGTRAP);
   ucontext_t *ctx = (ucontext_t *)arg;
-  if (single_step_size == 0) {
+  if (single_step_start_pos == NULL) {
     // we only expect to land here if we set a bp, a bp (0xcc / int 3) is one byte long
     // and instructions are completed before we get to the signal handler
     // so subtract one from our position
-    const uint8_t * pos = (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP] - 1;
+    uint8_t * pos = (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP] - 1;
 
     pos_actions_t * actions;
     HASH_FIND_PTR(pos_actions_map, &pos, actions);
@@ -957,13 +1020,14 @@ static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
       action_t * act = actions->actions;
       LL_FOREACH2(actions->actions, act, pos_next) {
         int verbose = act->pos == (uint8_t*)0x0; // for debugging purposes
+        if (verbose) { FPRINTF_TO_ERR_FILE("Execution annotations for %p\n", act->pos); }
         exec_annotation(act->byte_code, act->byte_code_len, ctx, act, verbose);
       }
 
       act = actions->actions;
 
       // restore old instruction and single step once then we can get the result
-      single_step_size = act->instruction_size;
+      single_step_start_pos = pos;
       
       // set trap flag to start single stepping
       ctx->uc_mcontext.gregs[REG_EFL] |= 0x100;
@@ -974,25 +1038,28 @@ static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
 
       remove_breakpoint(act, /*quiet*/ 1);
     } else {
-      FPRINTF_TO_ERR_FILE("no actions for %p found (before stepping)\n", pos);
+      FPRINTF_TO_ERR_FILE("ERROR no actions for %p found (before stepping)\n", pos);
+      _exit(1);
     }
     return;
   } else {
-    const uint8_t * pos = (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP] - single_step_size;
-    pos_actions_t * actions;
-    HASH_FIND_PTR(pos_actions_map, &pos, actions);
-    if (actions) {
-      action_t * act = actions->actions;
-      set_breakpoint(act, /*quiet*/ 1);
-    } else {
-      FPRINTF_TO_ERR_FILE("no actions for %p found (after stepping %d - real pos %p)\n",
-              pos, single_step_size, (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP]);
-    }
+
+    // const uint8_t * pos = (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP] - single_step_size;
+    // pos_actions_t * actions;
+    // HASH_FIND_PTR(pos_actions_map, &pos, actions);
+    // if (actions) {
+    //   action_t * act = actions->actions;
+    //   set_breakpoint(act, /*quiet*/ 1);
+    // } else {
+    //   FPRINTF_TO_ERR_FILE("no actions for %p found (after stepping %d - real pos %p)\n",
+    //           pos, single_step_size, (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP]);
+    // }
+    set_breakpoint_at_addr(single_step_start_pos);
 
     // unset trap flag
     ctx->uc_mcontext.gregs[REG_EFL] &= ~0x100;
 
-    single_step_size = 0;
+    single_step_start_pos = NULL;
   }
 }
 
@@ -1022,9 +1089,9 @@ static void print_annotations() {
 }
 
 static void handle_bb_req() {
-    struct BBReq req;
-    read_from_command_pipe(req);
-    write_to_command_pipe(req.pos, req.size);
+  struct BBReq req;
+  read_from_command_pipe(req);
+  write_to_command_pipe(req.pos, req.size);
 }
 
 static void remove_annotation(int annotation_id) {
