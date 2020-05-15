@@ -576,6 +576,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     if (get_head(&afl->active_annotations)->next) {
       LIST_FOREACH(&afl->active_annotations, annotation_t, {
         int improvement = 0;
+        int was_initialized = el->initialized;
         uint64_t touched = *(uint64_t*)el->shm_addr;
         if (touched) {
           switch(el->type) {
@@ -650,9 +651,11 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
           close(fd);
           zmq_send_file_path(afl, queue_fn, /* execs */ 1);
           struct queue_entry * qe = add_to_queue(afl, queue_fn, len, 0, /* do not update level */ 1);
-          qe->annotation_favored = 1;
-          qe->favored = 1;
-          ++afl->pending_favored;
+          if (was_initialized) { // only spend more time on subsequent annotation queue files
+            qe->annotation_favored = 1;
+            qe->favored = 1;
+            ++afl->pending_favored;
+          }
           list_append(&el->corresponding_queue_files, qe);
 
           // if not initialized we are not fuzzing a queue file for this annotation
