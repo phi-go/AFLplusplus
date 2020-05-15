@@ -38,14 +38,6 @@
 #include <stdint.h>
 #include <errno.h>
 
-// #include <link.h>
-// #include <stdio.h>
-// #include <execinfo.h>
-// #include <dlfcn.h>
-
-// #define UNW_LOCAL_ONLY
-// #include <libunwind.h>
-
 
 #include <sys/time.h>
 #include <time.h>
@@ -1172,99 +1164,8 @@ static void handle_deactivate_annotation() {
   }
 }
 
-// static void handle_resolve_function_address() {
-//   void * addr[1] = { 0 };
-//   read_from_command_pipe(addr[0]);
-
-//   char ** strings;
-
-//   if ((strings = backtrace_symbols(addr, 1)) == NULL) {
-//       FPRINTF_TO_ERR_FILE("backtrace_symbols err: %s\n", strerror(errno));
-//   } else {
-//     FPRINTF_TO_ERR_FILE("%p -> %s\n", addr[0], strings[0]);
-//   }
-//   free(strings);
-
-//   unw_proc_info_t pip;
-
-//   unw_get_proc_info_by_ip(unw_local_addr_space, addr[0], &pip, NULL);
-
-//   unw_word_t  offset, pc; 
-//   unw_cursor_t    cursor;
-//   unw_context_t   context;
-//   char        fname[64] = { 0 };
-
-//   unw_getcontext(&context);
-//   unw_init_local(&cursor, &context);
-
-//   unw_set_reg(&cursor, UNW_REG_IP, addr[0]);
-
-//   unw_get_reg(&cursor, UNW_REG_IP, &pc);
-
-//   (void) unw_get_proc_name(&cursor, fname, sizeof(fname), &offset);
-
-//   FPRINTF_TO_ERR_FILE("%p : (%s+0x%x) [%p]\n", pc, fname, offset, pc);
-
-//   FPRINTF_TO_ERR_FILE("unwind: %p %x\n", pip.start_ip, pip.format);
-
-
-
-//   // Dl_info info;
-//   // if (dladdr(req.pos, &info)) {
-//   //   FPRINTF_TO_ERR_FILE("%s %p %s %p\n", info.dli_fname, info.dli_fbase, info.dli_sname, info.dli_saddr);
-//   // } else {
-//   //   FPRINTF_TO_ERR_FILE("failed dladdr %s\n", dlerror());
-//   // }
-
-
-
-
-//   // char ** strings;
-
-//   // if (strings = backtrace_symbols(addr, 1) == NULL) {
-//   //     FPRINTF_TO_ERR_FILE("backtrace_symbols err: %s\n", strerror(errno));
-//   // } else {
-//   //   FPRINTF_TO_ERR_FILE("%p -> %s\n", addr[0], strings[0]);
-//   // }
-//   // free(strings);
-
-//   // dl_iterate_phdr(callback, NULL);
-//   // Dl_info info;
-//   // if (dladdr(&strlen, &info)) {
-//   //   FPRINTF_TO_ERR_FILE("%s %p %s %p\n", info.dli_fname, info.dli_fbase, info.dli_sname, info.dli_saddr);
-//   // } else {
-//   //   FPRINTF_TO_ERR_FILE("failed dladdr %s\n", dlerror());
-//   // }
-
-//   // int nptrs, j;
-//   // void * buffer[100];
-//   // nptrs = backtrace(buffer, 100);
-
-
-//   // if (strings == NULL) {
-//   //     exit(EXIT_FAILURE);
-//   // }
-
-//   // for (j = 0; j < nptrs; j++)
-
-
-// }
 
 /* Fork server logic. */
-
-// static int
-// callback(struct dl_phdr_info *info, size_t size, void *data)
-// {
-//     int j;
-
-//    FPRINTF_TO_ERR_FILE("name=%s (%d segments)\n", info->dlpi_name,
-//         info->dlpi_phnum);
-
-//    for (j = 0; j < info->dlpi_phnum; j++)
-//          FPRINTF_TO_ERR_FILE("\t\t header %2d: address=%10p\n", j,
-//              (void *) (info->dlpi_addr + info->dlpi_phdr[j].p_vaddr));
-//     return 0;
-// }
 
 static void __afl_start_forkserver(void) {
 
@@ -1389,8 +1290,6 @@ static void __afl_start_forkserver(void) {
         handle_ann_req();
       } else if (strncmp("DANR", cmd, 4) == 0) {
         handle_deann_req();
-      // } else if (strncmp("RADR", cmd, 4) == 0) {
-      //   handle_resolve_function_address();
       } else {
         FPRINTF_TO_ERR_FILE("fuzzee unknown command: %s\n", cmd);
       }
