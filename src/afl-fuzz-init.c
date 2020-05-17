@@ -2328,6 +2328,8 @@ void save_cmdline(afl_state_t *afl, u32 argc, char **argv) {
 
 }
 
+// #define CREDIT_DEBUG
+#define MAX_ZMQ_CREDIT 50
 
 void connect_zmq(afl_state_t * afl) {
   const char * afl_zmq_url = getenv("IJON_ZMQ_FUZZER_URL");
@@ -2335,26 +2337,38 @@ void connect_zmq(afl_state_t * afl) {
     WARNF("NOT Connecting to ZMQ as IJON_ZMQ_FUZZER_URL is not set.");
     afl->zmq_context = NULL;
     afl->zmq_socket = NULL;
+    afl->zmq_socket_credit = NULL;
     return;
   }
   if (!afl->sync_id) {
     FATAL("NOT Connecting to ZMQ as fuzzer has no sync_id use -M or -S.");
   }
+  afl->zmq_context = zmq_ctx_new();
+
   char zmq_id[128];
   snprintf(zmq_id, 128, "F_%s", afl->sync_id);
   OKF("Connecting to ZMQ as '%s'", zmq_id);
-  afl->zmq_context = zmq_ctx_new();
   afl->zmq_socket = zmq_socket(afl->zmq_context, ZMQ_DEALER);
   zmq_setsockopt(afl->zmq_socket, ZMQ_IDENTITY, zmq_id, strlen(zmq_id));
 
-  if (zmq_connect(afl->zmq_socket, afl_zmq_url) != 0) {
-    printf("ZMQ error: %s\n", strerror(errno));
+  char zmq_credit_id[128];
+  snprintf(zmq_credit_id, 128, "F_%s_credit", afl->sync_id);
+  OKF("Connecting to ZMQ (credit) as '%s'", zmq_credit_id);
+  afl->zmq_socket_credit = zmq_socket(afl->zmq_context, ZMQ_DEALER);
+  zmq_setsockopt(afl->zmq_socket_credit, ZMQ_IDENTITY, zmq_credit_id, strlen(zmq_credit_id));
+
+  if (zmq_connect(afl->zmq_socket, afl_zmq_url) != 0 || 
+      zmq_connect(afl->zmq_socket_credit, afl_zmq_url) != 0) {
+    FATAL("ZMQ error: %s\n", strerror(errno));
     afl->zmq_context = NULL;
     afl->zmq_socket = NULL;
+    afl->zmq_socket_credit = NULL;
     return;
   } else {
-    const char * msg = "F_UP";
-    zmq_send(afl->zmq_socket, msg, strlen(msg), 0);
+    zmq_send(afl->zmq_socket, "F_UP", strlen("F_UP"), 0);
+    zmq_send(afl->zmq_socket_credit, "FCUP", strlen("FCUP"), 0);
+    afl->zmq_credit = MAX_ZMQ_CREDIT;
+    OKF("Connected to ZMQ as '%s' (credit: %d)", zmq_id, afl->zmq_credit);
   }
 }
 
@@ -2369,15 +2383,46 @@ static int64_t __zmq_has_more(afl_state_t * afl) {
   int64_t more = 0;
   size_t more_size = sizeof(more);
   if (zmq_getsockopt(afl->zmq_socket, ZMQ_RCVMORE, &more, &more_size) != 0) {
-    fprintf(stderr, "ZMQ getsockopt: %s\n", zmq_strerror(errno));
+    FATAL("ZMQ getsockopt: %s\n", zmq_strerror(errno));
   }
   return more;
 }
 
-#define z_send(V, S, O) \
-    if (zmq_send(afl->zmq_socket, V, S, O) == -1) { \
-      FATAL("ZMQ send error: %s in %s:%d\n", zmq_strerror(errno), __FILE__, __LINE__); \
+static void zmq_dec_credit(afl_state_t * afl) {
+  if (afl->zmq_credit <= 0) {
+    FATAL("ZMQ no credit: %d\n", afl->zmq_credit);
+  }
+  --afl->zmq_credit;
+}
+
+static void zmq_maybe_wait_for_credit(afl_state_t * afl) {
+  char c[1] = { 0 };
+  if (afl->zmq_credit <= 0) {
+    if (zmq_recv(afl->zmq_socket_credit, c, 0, 0) != -1) {
+      ++afl->zmq_credit;
+    } else {
+      FATAL("ZMQ recv error: %s in %s:%d\n", zmq_strerror(errno), __FILE__, __LINE__);
     }
+  }
+  while (zmq_recv(afl->zmq_socket_credit, c, 0, ZMQ_DONTWAIT) != -1) {
+    ++afl->zmq_credit;
+  }
+  if (errno != EAGAIN) {
+    FATAL("ZMQ recv error: %s in %s:%d\n", zmq_strerror(errno), __FILE__, __LINE__);
+  }
+  if (afl->zmq_credit > MAX_ZMQ_CREDIT) {
+    FATAL("ZMQ greater than max credit: %d in %s:%d\n", afl->zmq_credit, __FILE__, __LINE__);
+  }
+}
+
+#define z_send(V, S, O) \
+  if (afl->zmq_credit <= 0) { \
+    FATAL("ZMQ no credit: %d in %s:%d\n", \
+          afl->zmq_credit, __FILE__, __LINE__); \
+  } \
+  if (zmq_send(afl->zmq_socket, V, S, O) == -1) { \
+    FATAL("ZMQ send error: %s in %s:%d\n", zmq_strerror(errno), __FILE__, __LINE__); \
+  }
 
 #define Z_READ(V, S) \
   if (!__zmq_has_more(afl)) { \
@@ -2415,26 +2460,41 @@ static int get_associated_annotation_id(afl_state_t * afl, struct queue_entry * 
 void zmq_send_exec_update(afl_state_t * afl, struct queue_entry * cur_entry, u64 execs) {
   if (afl->zmq_socket) {
     int associated_ann_id = get_associated_annotation_id(afl, cur_entry);
+    zmq_maybe_wait_for_credit(afl);
     z_send("F_QX", 4, ZMQ_SNDMORE);
     z_send(&execs, sizeof(execs), ZMQ_SNDMORE);
     z_send(cur_entry->fname, strlen(cur_entry->fname), ZMQ_SNDMORE);
     z_send(&associated_ann_id, sizeof(associated_ann_id), 0);
+#ifdef CREDIT_DEBUG
+    SAYF("exec update %d\n", afl->zmq_credit);
+#endif
+    zmq_dec_credit(afl);
   }
 }
 
 void zmq_send_file_path(afl_state_t * afl, char * file_path, u64 execs) {
   if (afl->zmq_socket) {
+    zmq_maybe_wait_for_credit(afl);
     z_send("F_QN", 4, ZMQ_SNDMORE);
     z_send(&execs, sizeof(execs), ZMQ_SNDMORE);
     z_send(file_path, strlen(file_path), 0);
+#ifdef CREDIT_DEBUG
+    SAYF("file path %d\n", afl->zmq_credit);
+#endif
+    zmq_dec_credit(afl);
   }
 }
 
 void   zmq_send_annotation_update(afl_state_t * afl, int annotation_id, u64 new_best) {
   if (afl->zmq_socket) {
+    zmq_maybe_wait_for_credit(afl);
     z_send("F_AU", 4, ZMQ_SNDMORE);
     z_send(&annotation_id, sizeof(annotation_id), ZMQ_SNDMORE);
     z_send(&new_best, sizeof(new_best), 0);
+#ifdef CREDIT_DEBUG
+    SAYF("ann update %d\n", afl->zmq_credit);
+#endif
+    zmq_dec_credit(afl);
   }
 }
 
@@ -2463,10 +2523,15 @@ static void __zmq_bb_req(afl_state_t * afl) {
   read_from_command_pipe(&bb_content, req.size);
 
   // send reply
+  zmq_maybe_wait_for_credit(afl);
   z_send("P_BB", 4, ZMQ_SNDMORE);
   z_send(&req.pos, sizeof(req.pos), ZMQ_SNDMORE);
   z_send(&req.size, sizeof(req.size), ZMQ_SNDMORE);
   z_send(&bb_content, req.size, 0);
+#ifdef CREDIT_DEBUG
+  SAYF("ann bb resp %d\n", afl->zmq_credit);
+#endif
+  zmq_dec_credit(afl);
 }
 
 #define MAX_INSTRUCTION_SIZE 16
@@ -2529,7 +2594,12 @@ static void __zmq_annotation_req(afl_state_t * afl) {
   // a value of action_pos == 0 is the in band EOF signal
   uint8_t * no_more = NULL;
   write_to_command_pipe(&no_more, sizeof(no_more));
+  zmq_maybe_wait_for_credit(afl);
   z_send("FEAR", 4, 0);
+#ifdef CREDIT_DEBUG
+  SAYF("ann enable ann %d\n", afl->zmq_credit);
+#endif
+  zmq_dec_credit(afl);
 }
 
 void remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann) {
@@ -2597,7 +2667,12 @@ static void __zmq_deannotation_req(afl_state_t * afl) {
   write_to_command_pipe(&cmd, sizeof(cmd));
   write_to_command_pipe(&id, sizeof(id));
 
+  zmq_maybe_wait_for_credit(afl);
   z_send("FDAR", 4, 0);
+#ifdef CREDIT_DEBUG
+  SAYF("ann disable ann %d\n", afl->zmq_credit);
+#endif
+  zmq_dec_credit(afl);
 }
 
 static void check_forkserver_response(afl_state_t * afl) {

@@ -594,7 +594,8 @@ typedef struct afl_state {
 
   /* ZMQ state */
   void *zmq_context;
-  void *zmq_socket;
+  void *zmq_socket, *zmq_socket_credit;
+  int zmq_credit;
 
   list_t all_annotations;
   list_t active_annotations;
