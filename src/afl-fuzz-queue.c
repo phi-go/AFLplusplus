@@ -108,7 +108,7 @@ void mark_as_redundant(afl_state_t *afl, struct queue_entry *q, u8 state) {
       if (n->prev != p) { \
         FATAL("prev %p != p %p", n->prev, p); \
       } \
-      if (cnt && (cnt+1)%100) { \
+      if (cnt % 100) { \
         if (n->next_100 != NULL) { \
           FATAL("expected next_100 at NOT cnt %d id: %d (total %d)", cnt, n->id, afl->queued_paths); \
         } \
@@ -148,14 +148,12 @@ struct queue_entry * add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passe
   if (q->depth > afl->max_depth) { afl->max_depth = q->depth; }
 
   if (afl->queue_top) {
-
     afl->queue_top->next = q;
     q->prev = afl->queue_top;
     afl->queue_top = q;
 
   } else {
-
-    afl->q_prev100 = afl->queue = afl->queue_top = q;
+    afl->queue = afl->queue_top = q;
 
   }
 
@@ -165,10 +163,26 @@ struct queue_entry * add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passe
 
   afl->cycles_wo_finds = 0;
 
-  if (!(afl->queued_paths % 100)) {
-    afl->q_prev100->next_100 = q;
-    afl->q_prev100 = q;
+  int q_pos = 0;
+  {
+    struct queue_entry *n = afl->queue, *last_100 = NULL;
+    int found = 0, cnt = 0;
+    while (n) {
+      
+      if (cnt % 100) {
+        n->next_100 = NULL;
+      } else {
+        if (last_100) {
+          last_100->next_100 = n;
+        }
+        last_100 = n;
+      }
 
+      if (n == q) { found = 1; }
+      if (!found) { q_pos++; }
+      cnt++;
+      n = n->next;
+    }
   }
 
   afl->last_path_time = get_cur_time();
@@ -201,64 +215,6 @@ struct queue_entry * add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passe
 /* Remove test case from the queue. */
 
 void remove_from_queue(afl_state_t *afl, struct queue_entry * q) {
-  int q_pos = 0;
-
-  {
-    struct queue_entry *n = afl->queue, *cur = NULL, *next = NULL, *last = NULL;
-    while (n) {
-
-      if (n->next_100) cur = n;
-
-      if (n == q) {
-
-        if (cur && q_pos/100 < afl->queued_paths/100) {
-          int first = 1;
-
-          while(cur->next_100) {
-
-            if (!first) {
-              cur->next->next_100 = cur->next_100;
-              cur->next_100 = NULL;
-              cur = cur->next;
-            }
-
-            next = cur->next_100;
-            last = cur;
-            cur->next_100 = cur->next_100->next;
-            cur = next;
-            first = 0;
-
-          }
-
-        }
-
-        if (last && afl->queued_paths/100 > 0 && !(afl->queued_paths % 100)) {
-          last->next_100 = NULL;
-        }
-
-        break;
-      }
-
-      n = n->next;
-      q_pos++;
-    }
-  }
-
-  if (1) {
-    struct queue_entry *n = afl->queue_top;
-    int found = 0;
-    while (n) {
-      if (n->next_100) {
-        afl->q_prev100 = n->next_100;
-        found = 1;
-        break;
-      }
-      n = n->prev;
-    }
-    if (!found) afl->q_prev100 = afl->queue;
-  }
-
-  if (q_pos < afl->current_entry) --afl->current_entry;
 
   if (afl->queue_cur == q) {
     afl->queue_cur = q->next;
@@ -279,6 +235,30 @@ void remove_from_queue(afl_state_t *afl, struct queue_entry * q) {
   if (q->next) {
     q->next->prev = q->prev;
   }
+
+  int q_pos = 0;
+  {
+    struct queue_entry *n = afl->queue, *last_100 = NULL;
+    int found = 0, cnt = 0;
+    while (n) {
+      
+      if (cnt % 100) {
+        n->next_100 = NULL;
+      } else {
+        if (last_100) {
+          last_100->next_100 = n;
+        }
+        last_100 = n;
+      }
+
+      if (n == q) { found = 1; }
+      if (!found) { q_pos++; }
+      cnt++;
+      n = n->next;
+    }
+  }
+
+  if (q_pos < afl->current_entry) --afl->current_entry;
 
   if (!q->was_fuzzed) --afl->pending_not_fuzzed;
   if (q->favored && afl->pending_favored > 0) --afl->pending_favored; // dont go below zero

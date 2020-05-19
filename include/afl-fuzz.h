@@ -557,8 +557,7 @@ typedef struct afl_state {
 
   struct queue_entry *queue,            /* Fuzzing queue (linked list)      */
       *queue_cur,                       /* Current offset within the queue  */
-      *queue_top,                       /* Top of the list                  */
-      *q_prev100;                       /* Previous 100 marker              */
+      *queue_top;                       /* Top of the list                  */
 
   struct queue_entry **top_rated;           /* Top entries for bitmap bytes */
 
