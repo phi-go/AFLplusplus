@@ -2485,11 +2485,13 @@ void zmq_send_file_path(afl_state_t * afl, char * file_path, u64 execs) {
   }
 }
 
-void   zmq_send_annotation_update(afl_state_t * afl, int annotation_id, u64 new_best) {
+void   zmq_send_annotation_update(afl_state_t * afl, int annotation_id,
+                                  u64 pos, u64 new_best) {
   if (afl->zmq_socket) {
     zmq_maybe_wait_for_credit(afl);
     z_send("F_AU", 4, ZMQ_SNDMORE);
     z_send(&annotation_id, sizeof(annotation_id), ZMQ_SNDMORE);
+    z_send(&pos, sizeof(pos), ZMQ_SNDMORE);
     z_send(&new_best, sizeof(new_best), 0);
 #ifdef CREDIT_DEBUG
     SAYF("ann update %d\n", afl->zmq_credit);
@@ -2554,7 +2556,19 @@ static void __zmq_annotation_req(afl_state_t * afl) {
   shmctl(ann->shm_id, IPC_RMID, NULL);
   ann->initialized = 0;
   ann->times_improved = 0;
-  memset(ann->cur_best, 0, sizeof(ann->cur_best)); // is overwritten when initialized
+  switch (ann->type) {
+    case ANN_MIN:
+      memset(ann->cur_best.best_values, '\xFF', sizeof(ann->cur_best.best_values));
+      break;
+    case ANN_MAX:
+      memset(ann->cur_best.best_values, 0, sizeof(ann->cur_best.best_values));
+      break;
+    case ANN_SET:
+      memset(ann->cur_best.set_hash_map, 0, sizeof(ann->cur_best.set_hash_map));
+      break;
+    default:
+      FATAL("Unknown annotation type %d", ann->type);
+  }
   list_append(&afl->all_annotations, ann);
 
   char cmd[4] = "EANR";

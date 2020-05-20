@@ -447,7 +447,6 @@ static void __afl_start_snapshots(void) {
 
 #endif
 
-#define HASH_MAP_SIZE 1024
 FILE * put_err_log_fp = NULL;
 
 #define FPRINTF_TO_ERR_FILE(...) \
@@ -588,15 +587,15 @@ typedef struct action {
   struct action * pos_next;
 } action_t;
 
-typedef struct annotation {
+typedef struct {
   int id;
   int shm_id;
-  void * shm_addr;
+  shm_content_t * shm_addr;
   action_t * actions;
   UT_hash_handle hh;
 } annotation_t;
 
-typedef struct pos_actions {
+typedef struct {
   void * pos;
   action_t * actions;
   UT_hash_handle hh;
@@ -931,44 +930,21 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
         }
         break;
       case GOAL_MIN:
+      case GOAL_MAX: // comparison is done in fuzzer code
         {
           // TODO this is not thread safe
           annotation_t * annotation;
           HASH_FIND_INT(annotations_map, &action->annotation_id, annotation);
           NULL_CHECK(annotation);
           NULL_CHECK(annotation->shm_addr);
-          uint64_t * annotation_used = annotation->shm_addr;
-          uint64_t * annotation_res = (uint64_t*)annotation->shm_addr + 1;
-          uint64_t old_res = *annotation_res;
-          uint64_t new_res;
-          BC_PEEK(new_res);
-          if (!(*annotation_used)) {
-            *annotation_used = 1;
-            *annotation_res = new_res;
-          } else if (new_res < old_res) {
-            printf("ann seen AGAIN (%p), old: %d new %d\n", action->pos, old_res, new_res);
-            *annotation_res = new_res;
+          shm_content_t * shm = annotation->shm_addr;
+          uint64_t res;
+          if (shm->num_writes_during_run >= ANNOTATION_RESULT_SIZE) {
+            break; // pos is too high
           }
-        }
-        break;
-      case GOAL_MAX:
-        {
-          annotation_t * annotation;
-          HASH_FIND_INT(annotations_map, &action->annotation_id, annotation);
-          NULL_CHECK(annotation);
-          NULL_CHECK(annotation->shm_addr);
-          uint64_t * annotation_used = annotation->shm_addr;
-          uint64_t * annotation_res = (uint64_t*)annotation->shm_addr + 1;
-          uint64_t old_res = *annotation_res;
-          uint64_t new_res;
-          BC_PEEK(new_res);
-          if (!(*annotation_used)) {
-            *annotation_used = 1;
-            *annotation_res = new_res;
-          } else if (new_res > old_res) {
-            printf("ann seen AGAIN (%p), old: %d new %d\n", action->pos, old_res, new_res);
-            *annotation_res = new_res;
-          }
+          BC_PEEK(res);
+          shm->result.best_values[shm->num_writes_during_run] = res;
+          shm->num_writes_during_run++;
         }
         break;
       case GOAL_SET:
@@ -977,22 +953,23 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
           HASH_FIND_INT(annotations_map, &action->annotation_id, annotation);
           NULL_CHECK(annotation);
           NULL_CHECK(annotation->shm_addr);
-          uint64_t * annotation_used = annotation->shm_addr;
-          uint8_t * annotation_res = (uint8_t*)((uint64_t*)annotation->shm_addr + 1);
+          shm_content_t * shm = annotation->shm_addr;
+          uint8_t * annotation_res = shm->result.set_hash_map;
           uint64_t x;
           BC_PEEK(x);
+          if (verbose) { FPRINTF_TO_ERR_FILE("num write: %d ", shm->num_writes_during_run); }
           if (verbose) { FPRINTF_TO_ERR_FILE("val: %llx ", x); }
           // hash it
           x = (x ^ (x >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
           x = (x ^ (x >> 27)) * UINT64_C(0x94d049bb133111eb);
           x = x ^ (x >> 31);
           if (verbose) { FPRINTF_TO_ERR_FILE("hashed: %llx ", x); }
-          x = x % (HASH_MAP_SIZE*8);
+          x = x % (sizeof(shm->result.set_hash_map)*8);
           if (verbose) { FPRINTF_TO_ERR_FILE("comp: %llx ", x); }
           int byte_offset = x/8;
           int bit_offset = x%8;
           if (verbose) { FPRINTF_TO_ERR_FILE("byte_off: %d bit_off: %d\n", byte_offset, bit_offset); }
-          *annotation_used = 1;
+          shm->num_writes_during_run++;
           annotation_res[byte_offset] |= (1 << (bit_offset));
         }
         break;
@@ -1393,7 +1370,7 @@ static void __afl_start_forkserver(void) {
       {
         annotation_t * ann;
         for (ann = annotations_map; ann != NULL; ann=ann->hh.next) {
-          *(uint64_t*)ann->shm_addr = 0;
+          ann->shm_addr->num_writes_during_run = 0;
         }
       }
 

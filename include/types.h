@@ -53,6 +53,20 @@ typedef uint32_t u32;
 #define FS_OPT_SET_MAPSIZE(x) \
   (x <= 1 || x > FS_OPT_MAX_MAPSIZE ? 0 : ((x - 1) << 1))
 
+// Annotation types used across rt and fuzzer code
+#define ANNOTATION_RESULT_SIZE 128 // each is 8 byte
+
+typedef union {
+  uint8_t set_hash_map[ANNOTATION_RESULT_SIZE*8];
+  uint64_t best_values[ANNOTATION_RESULT_SIZE];
+} annotation_result_t;
+
+typedef struct {
+  uint64_t num_writes_during_run;
+  annotation_result_t result;
+} shm_content_t;
+
+
 /*
 
    Ugh. There is an unintended compiler / glibc #include glitch caused by

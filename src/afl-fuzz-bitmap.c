@@ -577,47 +577,47 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
       LIST_FOREACH(&afl->active_annotations, annotation_t, {
         int improvement = 0;
         int was_initialized = el->initialized;
-        uint64_t touched = *(uint64_t*)el->shm_addr;
-        if (touched) {
+        uint64_t num_writes = el->shm_addr->num_writes_during_run;
+        if (num_writes) {
           switch(el->type) {
             case ANN_MIN:
               {
-                uint64_t contender = *((uint64_t*)el->shm_addr+1);
-                if (!el->initialized) {
-                  el->cur_best[0] = contender;
-                  improvement = 1;
-                } else {
-                  if (contender < el->cur_best[0]) {
-                    el->cur_best[0] = contender;
-                    improvement = 1;
+                for (int i = 0; i < num_writes; i++) {
+                  uint64_t contender = el->shm_addr->result.best_values[i];
+                  if (contender < el->cur_best.best_values[i]) {
+                    el->cur_best.best_values[i] = contender;
+                    improvement += 1;
+                    zmq_send_annotation_update(afl, el->id, i, contender);
                   }
                 }
               }
               break;
             case ANN_MAX:
               {
-                uint64_t contender = *((uint64_t*)el->shm_addr+1);
-                if (!el->initialized) {
-                  el->cur_best[0] = contender;
-                  improvement = 1;
-                } else {
-                  if (contender > el->cur_best[0]) {
-                    el->cur_best[0] = contender;
-                    improvement = 1;
+                for (int i = 0; i < num_writes; i++) {
+                  uint64_t contender = el->shm_addr->result.best_values[i];
+                  if (contender > el->cur_best.best_values[i]) {
+                    el->cur_best.best_values[i] = contender;
+                    improvement += 1;
+                    zmq_send_annotation_update(afl, el->id, i, contender);
                   }
                 }
               }
               break;
             case ANN_SET:
               {
-                uint64_t * bitmap = (uint64_t*)el->shm_addr+1;
-                for(int i = 0; i < ANNOTATION_BITMAP_SIZE; i++) {
-                  int cur_best = __builtin_popcountll(el->cur_best[i]);
-                  int contender = __builtin_popcountll(el->cur_best[i] |bitmap[i]);
+                uint8_t * bitmap = el->shm_addr->result.set_hash_map;
+                uint8_t * cur_best_map = el->cur_best.set_hash_map;
+                for(int i = 0; i < sizeof(el->shm_addr->result.set_hash_map); i++) {
+                  int cur_best = __builtin_popcount(cur_best_map[i]);
+                  int contender = __builtin_popcount(cur_best_map[i] | bitmap[i]);
                   if (contender > cur_best) {
-                      el->cur_best[i] |= bitmap[i];
+                      el->cur_best.set_hash_map[i] |= bitmap[i];
                       improvement += contender-cur_best;
                   }
+                }
+                if (improvement) {
+                  zmq_send_annotation_update(afl, el->id, 0, improvement);
                 }
               }
               break;
@@ -628,28 +628,17 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
         if (improvement) {
           ia = 1;
           el->times_improved += improvement;
-          switch (el->type) {
-            case ANN_MIN:
-            case ANN_MAX:
-              zmq_send_annotation_update(afl, el->id, el->cur_best[0]);
-              queue_fn = alloc_printf("%s/queue/id:%06u,%s,ann:%d,best:%lu", afl->out_dir,
-                                      afl->total_queued_paths, describe_op(afl, 0),
-                                      el->id, el->cur_best[0]);
-              break;
-            case ANN_SET:
-              zmq_send_annotation_update(afl, el->id, improvement);
-              queue_fn = alloc_printf("%s/queue/id:%06u,%s,ann:%d,best:%d", afl->out_dir,
-                                      afl->total_queued_paths, describe_op(afl, 0),
-                                      el->id, el->times_improved);
-              break;
-            default:
-              FATAL("Unknown annotation type %d", el->type);
-          }
+
+          queue_fn = alloc_printf("%s/queue/id:%06u,%s,ann:%d,impr:%d", afl->out_dir,
+                                  afl->total_queued_paths, describe_op(afl, 0),
+                                  el->id, el->times_improved);
           fd = open(queue_fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
           if (unlikely(fd < 0)) PFATAL("Unable to create '%s'", queue_fn);
           ck_write(fd, mem, len, queue_fn);
           close(fd);
+
           zmq_send_file_path(afl, queue_fn, /* execs */ 1);
+
           struct queue_entry * qe = add_to_queue(afl, queue_fn, len, 0, /* do not update level */ 1);
           if (was_initialized) { // only spend more time on subsequent annotation queue files
             qe->annotation_favored = 1;

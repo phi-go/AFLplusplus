@@ -157,16 +157,14 @@ struct queue_entry {
 
 typedef enum {ANN_MIN, ANN_SET, ANN_MAX} annotation_type_t;
 
-#define ANNOTATION_BITMAP_SIZE 128
-
 typedef struct annotation {
   int id;
   annotation_type_t type;
   int shm_id;
-  void * shm_addr;
+  shm_content_t * shm_addr;
   int initialized;
   int times_improved;
-  uint64_t cur_best[ANNOTATION_BITMAP_SIZE];
+  annotation_result_t cur_best;
   list_t corresponding_queue_files;
 } annotation_t;
 
@@ -963,7 +961,7 @@ void   connect_zmq(afl_state_t *);
 void   disconnect_zmq(afl_state_t *);
 void   zmq_send_file_path(afl_state_t *, char *, u64);
 void   zmq_send_exec_update(afl_state_t *, struct queue_entry *, u64);
-void   zmq_send_annotation_update(afl_state_t *, int, u64);
+void   zmq_send_annotation_update(afl_state_t *, int ann_id, u64 pos, u64 new_best);
 void   zmq_handle_commands(afl_state_t *);
 void   remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann);
 void   leave_best_annotation_queue_file(afl_state_t * afl, annotation_t * ann);
