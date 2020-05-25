@@ -165,6 +165,7 @@ typedef struct annotation {
   int initialized;
   int times_improved;
   annotation_result_t cur_best;
+  int max_pos;
   list_t corresponding_queue_files;
 } annotation_t;
 

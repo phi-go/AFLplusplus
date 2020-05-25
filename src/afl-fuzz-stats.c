@@ -864,19 +864,27 @@ void show_stats(afl_state_t *afl) {
 #define PRINT_ANNOTATION() \
   switch (el->type) { \
     case(ANN_MIN): { \
+      int length = 0; \
       SAYF("\n" bV bSTOP cRST); \
-      sprintf(tmp, "id: %4d min(%d) %4d: %lu %lu", el->id, el->initialized, \
-              el->times_improved, el->cur_best.best_values[0], \
-              el->cur_best.best_values[1]); \
-      SAYF(" %-74s ", tmp); \
+      length += sprintf(tmp+length, "id: %4d min(%d) %4d: ", \
+                        el->id, el->initialized, el->times_improved); \
+      for (int i = 0; i <= el->max_pos; i++) { \
+        if (length > 75) { break; } \
+        length+= sprintf(tmp+length, "%lu ", el->cur_best.best_values[i]); \
+      } \
+      SAYF(" %-74.74s ", tmp); \
       SAYF(SET_G1 bSTG bV); \
     } break; \
     case(ANN_MAX): { \
+      int length = 0; \
       SAYF("\n" bV bSTOP cRST); \
-      sprintf(tmp, "id: %4d max(%d) %4d: %lu %lu", el->id, el->initialized, \
-              el->times_improved, el->cur_best.best_values[0],  \
-              el->cur_best.best_values[1]); \
-      SAYF(" %-74s ", tmp); \
+      length += sprintf(tmp+length, "id: %4d max(%d) %4d: ", \
+                        el->id, el->initialized, el->times_improved); \
+      for (int i = 0; i <= el->max_pos; i++) { \
+        if (length > 75) { break; } \
+        length+= sprintf(tmp+length, "%lu ", el->cur_best.best_values[i]); \
+      } \
+      SAYF(" %-74.74s ", tmp); \
       SAYF(SET_G1 bSTG bV); \
     } break; \
     case(ANN_SET): { \

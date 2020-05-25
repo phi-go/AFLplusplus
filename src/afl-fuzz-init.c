@@ -2556,6 +2556,7 @@ static void __zmq_annotation_req(afl_state_t * afl) {
   shmctl(ann->shm_id, IPC_RMID, NULL);
   ann->initialized = 0;
   ann->times_improved = 0;
+  ann->max_pos = -1;
   switch (ann->type) {
     case ANN_MIN:
       memset(ann->cur_best.best_values, '\xFF', sizeof(ann->cur_best.best_values));

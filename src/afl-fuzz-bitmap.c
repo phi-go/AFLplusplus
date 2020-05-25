@@ -576,7 +576,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     if (get_head(&afl->active_annotations)->next) {
       LIST_FOREACH(&afl->active_annotations, annotation_t, {
         int improvement = 0;
-        int was_initialized = el->initialized;
+        int interesting = 0;
         uint64_t num_writes = el->shm_addr->num_writes_during_run;
         if (num_writes) {
           switch(el->type) {
@@ -587,6 +587,8 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
                   if (contender < el->cur_best.best_values[i]) {
                     el->cur_best.best_values[i] = contender;
                     improvement += 1;
+                    if (i > el->max_pos) { el->max_pos = i; }
+                    else { interesting = 1; }
                     zmq_send_annotation_update(afl, el->id, i, contender);
                   }
                 }
@@ -599,6 +601,8 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
                   if (contender > el->cur_best.best_values[i]) {
                     el->cur_best.best_values[i] = contender;
                     improvement += 1;
+                    if (i > el->max_pos) { el->max_pos = i; }
+                    else { interesting = 1; }
                     zmq_send_annotation_update(afl, el->id, i, contender);
                   }
                 }
@@ -617,6 +621,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
                   }
                 }
                 if (improvement) {
+                  interesting = el->initialized;
                   zmq_send_annotation_update(afl, el->id, 0, improvement);
                 }
               }
@@ -640,7 +645,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
           zmq_send_file_path(afl, queue_fn, /* execs */ 1);
 
           struct queue_entry * qe = add_to_queue(afl, queue_fn, len, 0, /* do not update level */ 1);
-          if (was_initialized) { // only spend more time on subsequent annotation queue files
+          if (interesting) {
             qe->annotation_favored = 1;
             qe->favored = 1;
             ++afl->pending_favored;
