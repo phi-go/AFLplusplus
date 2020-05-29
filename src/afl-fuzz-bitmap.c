@@ -576,6 +576,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     if (get_head(&afl->active_annotations)->next) {
       LIST_FOREACH(&afl->active_annotations, annotation_t, {
         int improvement = 0;
+        u8 ann_best_for_pos[ANNOTATION_RESULT_SIZE] = { 0 };
         uint64_t num_writes = el->shm_addr->num_writes_during_run;
         if (num_writes) {
           switch(el->type) {
@@ -587,6 +588,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
                     el->cur_best.best_values[i] = contender;
                     improvement += 1;
                     if (i > el->max_pos) { el->max_pos = i; }
+                    ann_best_for_pos[i] = 1;
                     zmq_send_annotation_update(afl, el->id, i, contender);
                   }
                 }
@@ -600,6 +602,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
                     el->cur_best.best_values[i] = contender;
                     improvement += 1;
                     if (i > el->max_pos) { el->max_pos = i; }
+                    ann_best_for_pos[i] = 1;
                     zmq_send_annotation_update(afl, el->id, i, contender);
                   }
                 }
@@ -640,7 +643,8 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
           zmq_send_file_path(afl, queue_fn, /* execs */ 1);
 
-          add_to_queue(afl, queue_fn, len, 0, el, /* do not update level */ 1);
+          add_to_queue(afl, queue_fn, len, 0, el, ann_best_for_pos,
+                       /* do not update level */ 1);
 
           // if not initialized we are not fuzzing a queue file for this annotation
           // as this annotation can not have any queue files
@@ -677,7 +681,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
 #endif                                                    /* ^!SIMPLE_FILES */
 
-    add_to_queue(afl, queue_fn, len, 0, NULL, 0);
+    add_to_queue(afl, queue_fn, len, 0, NULL, NULL, 0);
 
     if (hnb == 2) {
 

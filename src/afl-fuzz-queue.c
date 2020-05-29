@@ -133,14 +133,28 @@ void mark_as_redundant(afl_state_t *afl, struct queue_entry *q, u8 state) {
 /* Append new test case to the queue. */
 
 struct queue_entry * add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det,
-                                  annotation_t * ann, int_fast8_t ignore_depth) {
+                                  annotation_t * ann,
+                                  u8 ann_best_for_pos[ANNOTATION_RESULT_SIZE],
+                                  int_fast8_t ignore_depth) {
   struct queue_entry *q = ck_alloc(sizeof(struct queue_entry));
 
   q->fname = fname;
   q->len = len;
   q->ann = ann;
   if (ann != NULL) {
+    if (ann_best_for_pos == NULL) { FATAL("Need ann_best_for_pos when passing ann."); }
+    memcpy(q->ann_best_for_pos, ann_best_for_pos, ANNOTATION_RESULT_SIZE);
+    if (get_head(&ann->corresponding_queue_files)->next) {
+      LIST_FOREACH(&ann->corresponding_queue_files, struct queue_entry, {
+        for (int i = 0; i < ANNOTATION_RESULT_SIZE; i++) {
+          if(q->ann_best_for_pos[i]) {
+            el->ann_best_for_pos[i] = 0;
+          }
+        }
+      });
+    }
     list_append(&ann->corresponding_queue_files, q);
+    ann->new_ann_queue_files = 1;
     q->ann_pos = ++ann->num_corresponding_queue_files;
     ann->newest_qe = q;
   }

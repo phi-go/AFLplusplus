@@ -870,7 +870,7 @@ void show_stats(afl_state_t *afl) {
                         el->id, el->initialized, el->times_improved); \
       for (int i = 0; i <= el->max_pos; i++) { \
         if (length > 75) { break; } \
-        length+= sprintf(tmp+length, "%lu ", el->cur_best.best_values[i]); \
+        length+= sprintf(tmp+length, "%lx ", el->cur_best.best_values[i]); \
       } \
       SAYF(" %-74.74s ", tmp); \
       SAYF(SET_G1 bSTG bV); \
@@ -882,7 +882,7 @@ void show_stats(afl_state_t *afl) {
                         el->id, el->initialized, el->times_improved); \
       for (int i = 0; i <= el->max_pos; i++) { \
         if (length > 75) { break; } \
-        length+= sprintf(tmp+length, "%lu ", el->cur_best.best_values[i]); \
+        length+= sprintf(tmp+length, "%lx ", el->cur_best.best_values[i]); \
       } \
       SAYF(" %-74.74s ", tmp); \
       SAYF(SET_G1 bSTG bV); \

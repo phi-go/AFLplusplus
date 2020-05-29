@@ -445,7 +445,7 @@ void read_testcases(afl_state_t *afl) {
 
     if (!access(dfn, F_OK)) { passed_det = 1; }
 
-    add_to_queue(afl, fn2, st.st_size, passed_det, NULL, 0);
+    add_to_queue(afl, fn2, st.st_size, passed_det, NULL, NULL, 0);
 
   }
 
@@ -2626,41 +2626,79 @@ void remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann) {
   }
 }
 
-void leave_best_annotation_queue_file(afl_state_t * afl, annotation_t * ann) {
+static void leave_best_min_max_annotation_queue_files(afl_state_t * afl, annotation_t * ann) {
+  if (!ann->new_ann_queue_files) { return; }
+  if (ann->type != ANN_MIN && ann->type != ANN_MAX ) { FATAL("this function is only for ann max and min"); }
   if (get_head(&ann->corresponding_queue_files)->next) {
-    struct queue_entry * keep = NULL;
     LIST_FOREACH(&ann->corresponding_queue_files, struct queue_entry, {
-      keep = el;  // keep last
-    });
-    LIST_FOREACH(&ann->corresponding_queue_files, struct queue_entry, {
-      if (el != keep) {
+      int remove = 1;
+      for (int i = 0; i < sizeof(el->ann_best_for_pos); i++) {
+        if (el->ann_best_for_pos[i]) {
+
+          switch(ann->type) {
+            case ANN_MIN:
+              if (ann->cur_best.best_values[i] == 0) {
+                // best possible so no longer interesting
+                continue;
+              }
+              break;
+            case ANN_MAX:
+              if (ann->cur_best.best_values[i] == UINT64_MAX) {
+                // best possible so no longer interesting
+                continue;
+              }
+              break;
+          default:
+            FATAL("Unexpected annotation type %d", ann->type);
+          }
+
+        // still interesting keep
+        remove = 0;
+        break;
+        }
+      }
+      if (remove) {
         LIST_REMOVE_CURRENT_EL_IN_FOREACH();
         remove_from_queue(afl, el);
       }
     });
   }
+  ann->new_ann_queue_files = 0;
 }
 
 int skip_queue_file(afl_state_t * afl, struct queue_entry * qe) {
   if (qe->ann == NULL) {
     /* not an annotation queue file, do nothing special */
   } else {
-    /* later set queue files are more interesting, prefer them slightly */
-    if (rand_below(afl, qe->ann->num_corresponding_queue_files) > qe->ann_pos) { return 1; }
+    switch(qe->ann->type) {
+      case ANN_MIN:
+      case ANN_MAX:
+        /* only best for position queue files, all equally interesting */
+        break;
+      case ANN_SET:
+        /* later set queue files are more interesting, prefer them slightly */
+        // if (rand_below(afl, qe->ann->num_corresponding_queue_files) > qe->ann_pos) { return 1; }
+        break;
+      default:
+        FATAL("Unknown annotation type %d", qe->ann->type);
+    }
   }
 
   // skip if heavily fuzzed
-  return (rand_below(afl, qe->fuzz_level+1) > (10 + qe->len*8));
+  return (rand_below(afl, qe->fuzz_level+1) > (10 + qe->len*32));
 }
 
 void clean_up_annotation_queue_files(afl_state_t * afl) {
   if (get_head(&afl->all_annotations)->next) {
     LIST_FOREACH(&afl->all_annotations, annotation_t, {
       switch(el->type) {
-        // take care of qe->ann_pos when deleting
         case ANN_MIN:
         case ANN_MAX:
+          // qe->ann_pos is not needed for these annotations types so ignore
+          leave_best_min_max_annotation_queue_files(afl, el);
+          break;
         case ANN_SET:
+        // take care of qe->ann_pos when deleting
           break;
         default:
           FATAL("Unknown annotation type %d, known MIN(%d), MAX(%d), SET(%d)",

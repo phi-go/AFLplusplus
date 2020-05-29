@@ -135,6 +135,7 @@ typedef struct annotation {
   int max_pos;
   list_t corresponding_queue_files;
   int num_corresponding_queue_files;
+  int new_ann_queue_files;
   struct queue_entry * newest_qe;
 } annotation_t;
 
@@ -172,6 +173,7 @@ struct queue_entry {
 
   annotation_t *ann;                    /* Belongs to this annotation if not NULL */
   u32 ann_pos;                          /* Is at that position for queue files belonging to this ann */
+  u8 ann_best_for_pos[ANNOTATION_RESULT_SIZE]; /* if best for relevant position */
 
 };
 
@@ -877,7 +879,8 @@ void   deinit_py(void *);
 void mark_as_det_done(afl_state_t *, struct queue_entry *);
 void mark_as_variable(afl_state_t *, struct queue_entry *);
 void mark_as_redundant(afl_state_t *, struct queue_entry *, u8);
-struct queue_entry * add_to_queue(afl_state_t *, u8 *, u32, u8, annotation_t *, int_fast8_t);
+struct queue_entry * add_to_queue(afl_state_t *, u8 *, u32, u8, annotation_t *,
+                                  u8 ann_best_for_pos[ANNOTATION_RESULT_SIZE], int_fast8_t);
 void remove_from_queue(afl_state_t *, struct queue_entry *);
 void destroy_queue(afl_state_t *);
 void update_bitmap_score(afl_state_t *, struct queue_entry *);
@@ -971,7 +974,6 @@ void   zmq_send_exec_update(afl_state_t *, struct queue_entry *, u64);
 void   zmq_send_annotation_update(afl_state_t *, int ann_id, u64 pos, u64 new_best);
 void   zmq_handle_commands(afl_state_t *);
 void   remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann);
-void   leave_best_annotation_queue_file(afl_state_t * afl, annotation_t * ann);
 void   clean_up_annotation_queue_files(afl_state_t * afl);
 int    skip_queue_file(afl_state_t * afl, struct queue_entry * qe);
 void   disable_annotation(afl_state_t * afl, annotation_t * ann);
