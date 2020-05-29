@@ -445,7 +445,7 @@ void read_testcases(afl_state_t *afl) {
 
     if (!access(dfn, F_OK)) { passed_det = 1; }
 
-    add_to_queue(afl, fn2, st.st_size, passed_det, 0);
+    add_to_queue(afl, fn2, st.st_size, passed_det, NULL, 0);
 
   }
 
@@ -2641,18 +2641,30 @@ void leave_best_annotation_queue_file(afl_state_t * afl, annotation_t * ann) {
   }
 }
 
+int skip_queue_file(afl_state_t * afl, struct queue_entry * qe) {
+  if (qe->ann == NULL) {
+    /* not an annotation queue file, do nothing special */
+  } else {
+    /* later set queue files are more interesting, prefer them slightly */
+    if (rand_below(afl, qe->ann->num_corresponding_queue_files) > qe->ann_pos) { return 1; }
+  }
+
+  // skip if heavily fuzzed
+  return (rand_below(afl, qe->fuzz_level+1) > (10 + qe->len*8));
+}
+
 void clean_up_annotation_queue_files(afl_state_t * afl) {
   if (get_head(&afl->all_annotations)->next) {
     LIST_FOREACH(&afl->all_annotations, annotation_t, {
       switch(el->type) {
+        // take care of qe->ann_pos when deleting
         case ANN_MIN:
         case ANN_MAX:
-          // leave_best_annotation_queue_file(afl, el);
-          break;
         case ANN_SET:
-          break; // keep all, they are all interesting
+          break;
         default:
-          FATAL("Unknown annotation type %d", el->type);
+          FATAL("Unknown annotation type %d, known MIN(%d), MAX(%d), SET(%d)",
+                el->type, ANN_MIN, ANN_MAX, ANN_SET);
       }
     });
   }
@@ -2661,12 +2673,14 @@ void clean_up_annotation_queue_files(afl_state_t * afl) {
 static void __zmq_deannotation_req(afl_state_t * afl) {
   int id;
   Z_READ(&id, sizeof(id))
-  LIST_FOREACH(&afl->active_annotations, annotation_t, {
-    if (el->id == id) {
-      LIST_REMOVE_CURRENT_EL_IN_FOREACH();
-      break;
-    }
-  });
+  if (get_head(&afl->active_annotations)->next) {
+    LIST_FOREACH(&afl->active_annotations, annotation_t, {
+      if (el->id == id) {
+        LIST_REMOVE_CURRENT_EL_IN_FOREACH();
+        break;
+      }
+    });
+  }
   LIST_FOREACH(&afl->all_annotations, annotation_t, {
     if (el->id == id) {
       LIST_REMOVE_CURRENT_EL_IN_FOREACH();

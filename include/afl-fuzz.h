@@ -120,6 +120,24 @@ extern s16 interesting_16[INTERESTING_8_LEN + INTERESTING_16_LEN];
 extern s32
     interesting_32[INTERESTING_8_LEN + INTERESTING_16_LEN + INTERESTING_32_LEN];
 
+typedef enum {ANN_MIN, ANN_SET, ANN_MAX} annotation_type_t;
+
+struct queue_entry;
+
+typedef struct annotation {
+  int id;
+  annotation_type_t type;
+  int shm_id;
+  shm_content_t * shm_addr;
+  int initialized;
+  int times_improved;
+  annotation_result_t cur_best;
+  int max_pos;
+  list_t corresponding_queue_files;
+  int num_corresponding_queue_files;
+  struct queue_entry * newest_qe;
+} annotation_t;
+
 struct queue_entry {
 
   u8 *fname;                            /* File name for the test case      */
@@ -132,7 +150,6 @@ struct queue_entry {
       has_new_cov,                      /* Triggers new coverage?           */
       var_behavior,                     /* Variable behavior?               */
       favored,                          /* Currently favored?               */
-      annotation_favored,               /* Favored due to an annotation?    */
       fs_redundant,                     /* Marked as redundant in the fs?   */
       fully_colorized;                  /* Do not run redqueen stage again  */
 
@@ -153,21 +170,10 @@ struct queue_entry {
       *prev,                            /* Previous element, if any         */
       *next_100;                        /* 100 elements ahead               */
 
+  annotation_t *ann;                    /* Belongs to this annotation if not NULL */
+  u32 ann_pos;                          /* Is at that position for queue files belonging to this ann */
+
 };
-
-typedef enum {ANN_MIN, ANN_SET, ANN_MAX} annotation_type_t;
-
-typedef struct annotation {
-  int id;
-  annotation_type_t type;
-  int shm_id;
-  shm_content_t * shm_addr;
-  int initialized;
-  int times_improved;
-  annotation_result_t cur_best;
-  int max_pos;
-  list_t corresponding_queue_files;
-} annotation_t;
 
 struct extra_data {
 
@@ -871,7 +877,7 @@ void   deinit_py(void *);
 void mark_as_det_done(afl_state_t *, struct queue_entry *);
 void mark_as_variable(afl_state_t *, struct queue_entry *);
 void mark_as_redundant(afl_state_t *, struct queue_entry *, u8);
-struct queue_entry * add_to_queue(afl_state_t *, u8 *, u32, u8, int_fast8_t);
+struct queue_entry * add_to_queue(afl_state_t *, u8 *, u32, u8, annotation_t *, int_fast8_t);
 void remove_from_queue(afl_state_t *, struct queue_entry *);
 void destroy_queue(afl_state_t *);
 void update_bitmap_score(afl_state_t *, struct queue_entry *);
@@ -967,6 +973,7 @@ void   zmq_handle_commands(afl_state_t *);
 void   remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann);
 void   leave_best_annotation_queue_file(afl_state_t * afl, annotation_t * ann);
 void   clean_up_annotation_queue_files(afl_state_t * afl);
+int    skip_queue_file(afl_state_t * afl, struct queue_entry * qe);
 void   disable_annotation(afl_state_t * afl, annotation_t * ann);
 void   adjust_active_annotations(afl_state_t * afl, int);
 void   exchange_new_queue_files(afl_state_t * afl);

@@ -132,11 +132,18 @@ void mark_as_redundant(afl_state_t *afl, struct queue_entry *q, u8 state) {
 
 /* Append new test case to the queue. */
 
-struct queue_entry * add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det, int_fast8_t ignore_depth) {
+struct queue_entry * add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det,
+                                  annotation_t * ann, int_fast8_t ignore_depth) {
   struct queue_entry *q = ck_alloc(sizeof(struct queue_entry));
 
   q->fname = fname;
   q->len = len;
+  q->ann = ann;
+  if (ann != NULL) {
+    list_append(&ann->corresponding_queue_files, q);
+    q->ann_pos = ++ann->num_corresponding_queue_files;
+    ann->newest_qe = q;
+  }
   if(!ignore_depth) {
     q->depth = afl->cur_depth + 1;
   }
@@ -479,11 +486,6 @@ void cull_queue(afl_state_t *afl) {
   q = afl->queue;
 
   while (q) {
-
-    if (!q->favored && q->annotation_favored) {
-      q->favored = 1;
-      ++afl->pending_favored;
-    } 
 
     mark_as_redundant(afl, q, !q->favored);
     q = q->next;

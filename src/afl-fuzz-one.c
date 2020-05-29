@@ -415,28 +415,21 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
     }
 
-  } else if (!afl->dumb_mode && !afl->queue_cur->favored &&
+  }
+  else if (!afl->dumb_mode && !afl->queue_cur->favored &&
 
              afl->queued_paths > 10) {
 
-    /* Otherwise, still possibly skip non-favored cases, albeit less often.
-       The odds of skipping stuff are higher for already-fuzzed inputs and
-       lower for never-fuzzed entries. */
-
-    if (afl->queue_cycle > 1 &&
-        (afl->queue_cur->fuzz_level == 0 || afl->queue_cur->was_fuzzed)) {
-
-      if (rand_below(afl, 100) < SKIP_NFAV_NEW_PROB) { return 1; }
-
-    } else {
-
-      if (rand_below(afl, 100) < SKIP_NFAV_OLD_PROB) { return 1; }
-
-    }
+  /* Custom skipping for ann queue files and by fuzz level compared to length. */
+  if (skip_queue_file(afl, afl->queue_cur)) {
+    return 1;
+  }
 
   }
 
 #endif                                                     /* ^IGNORE_FINDS */
+
+  adjust_active_annotations(afl, 0);
 
   if (unlikely(afl->not_on_tty)) {
 
@@ -2517,7 +2510,6 @@ abandon_entry:
   }
 
   ++afl->queue_cur->fuzz_level;
-  afl->queue_cur->annotation_favored = 0; // only favored once
 
   munmap(orig_in, afl->queue_cur->len);
   zmq_send_exec_update(afl, afl->queue_cur, afl->fsrv.total_execs - num_exec_start);
