@@ -1840,7 +1840,8 @@ havoc_stage:
 
   for (afl->stage_cur = 0; afl->stage_cur < afl->stage_max; ++afl->stage_cur) {
 
-    u32 use_stacking = 1 << (1 + rand_below(afl, HAVOC_STACK_POW2));
+    // Also allow only one change, this is different to the normal implementation
+    u32 use_stacking = 1 << (rand_below(afl, HAVOC_STACK_POW2+1));
 
     afl->stage_cur_val = use_stacking;
 
