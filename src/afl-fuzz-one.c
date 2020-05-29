@@ -415,15 +415,12 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
     }
 
-  }
-  else if (!afl->dumb_mode && !afl->queue_cur->favored &&
+  } else if (!afl->dumb_mode) {
 
-             afl->queued_paths > 10) {
-
-  /* Custom skipping for ann queue files and by fuzz level compared to length. */
-  if (skip_queue_file(afl, afl->queue_cur)) {
-    return 1;
-  }
+    /* Custom skipping for ann queue files and by fuzz level compared to length. */
+    if (skip_queue_file(afl, afl->queue_cur)) {
+      return 1;
+    }
 
   }
 
@@ -2510,6 +2507,7 @@ abandon_entry:
   }
 
   ++afl->queue_cur->fuzz_level;
+  ++afl->total_fuzz_level;
 
   munmap(orig_in, afl->queue_cur->len);
   zmq_send_exec_update(afl, afl->queue_cur, afl->fsrv.total_execs - num_exec_start);

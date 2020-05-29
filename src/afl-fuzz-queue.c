@@ -284,6 +284,7 @@ void remove_from_queue(afl_state_t *afl, struct queue_entry * q) {
   if (!q->was_fuzzed) --afl->pending_not_fuzzed;
   if (q->favored && afl->pending_favored > 0) --afl->pending_favored; // dont go below zero
 
+  afl->total_fuzz_level -= q->fuzz_level;
   --afl->queued_paths;
 
   for (int i = 0; i < afl->fsrv.map_size; ++i) {

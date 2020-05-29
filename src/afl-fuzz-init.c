@@ -2667,25 +2667,27 @@ static void leave_best_min_max_annotation_queue_files(afl_state_t * afl, annotat
 }
 
 int skip_queue_file(afl_state_t * afl, struct queue_entry * qe) {
-  if (qe->ann == NULL) {
-    /* not an annotation queue file, do nothing special */
-  } else {
-    switch(qe->ann->type) {
-      case ANN_MIN:
-      case ANN_MAX:
-        /* only best for position queue files, all equally interesting */
-        break;
-      case ANN_SET:
-        /* later set queue files are more interesting, prefer them slightly */
-        // if (rand_below(afl, qe->ann->num_corresponding_queue_files) > qe->ann_pos) { return 1; }
-        break;
-      default:
-        FATAL("Unknown annotation type %d", qe->ann->type);
-    }
-  }
+  // template for more complicated skip conditions
+  // if (qe->ann == NULL) {
+  //   /* not an annotation queue file, do nothing special */
+  // } else {
+  //   switch(qe->ann->type) {
+  //     case ANN_MIN:
+  //     case ANN_MAX:
+  //       /* only best for position queue files, all equally interesting */
+  //       break;
+  //     case ANN_SET:
+  //       /* later set queue files are more interesting, prefer them slightly */
+  //       // if (rand_below(afl, qe->ann->num_corresponding_queue_files) > qe->ann_pos) { return 1; }
+  //       break;
+  //     default:
+  //       FATAL("Unknown annotation type %d", qe->ann->type);
+  //   }
+  // }
 
-  // skip if heavily fuzzed
-  return (rand_below(afl, qe->fuzz_level+1) > (10 + qe->len*32));
+  // skip if less fuzzed queue entries are available
+
+  return qe->fuzz_level > (double)afl->total_fuzz_level / afl->queued_paths;
 }
 
 void clean_up_annotation_queue_files(afl_state_t * afl) {

@@ -901,7 +901,8 @@ void show_stats(afl_state_t *afl) {
   int i = 0;
   if (get_head(&afl->active_annotations)->next) {
     SAYF("\n" bV bSTOP cGRA);
-    SAYF(" %-74s ", "active annotations:");
+    SAYF(" (avg fuzz level: %9.4f) %-46s ", (double)afl->total_fuzz_level / afl->queued_paths,
+         "active annotations:");
     SAYF(SET_G1 bSTG bV);
     LIST_FOREACH(&afl->active_annotations, annotation_t, {
       if (i++ < 40) {

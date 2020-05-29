@@ -501,6 +501,8 @@ typedef struct afl_state {
       current_entry,                    /* Current queue entry ID           */
       havoc_div;                        /* Cycle count divisor for havoc    */
 
+  u64 total_fuzz_level;                 /* Toal of fuzz level of queue files, used to skip to fresh qf */
+
   u64 total_crashes,                    /* Total number of crashes          */
       unique_crashes,                   /* Crashes with unique signatures   */
       total_tmouts,                     /* Total number of timeouts         */
