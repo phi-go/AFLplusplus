@@ -676,6 +676,14 @@ static void remove_breakpoint(action_t * action, int quiet) {
   case NAME##IL: \
     return REGISTER_LOWER(ctx->uc_mcontext.gregs[REG_R##NAME##I]);
 
+#define P_REGISTER_CASES(NAME) \
+  case R##NAME##P: \
+    return ctx->uc_mcontext.gregs[REG_R##NAME##P]; \
+  case E##NAME##P: \
+    return REGISTER_EXTENDED(ctx->uc_mcontext.gregs[REG_R##NAME##P]); \
+  case NAME##P: \
+    return REGISTER_LOWER(ctx->uc_mcontext.gregs[REG_R##NAME##P]);
+
 #define NEW_REGISTER_CASES(NAME) \
   case R##NAME: \
     return ctx->uc_mcontext.gregs[REG_R##NAME]; \
@@ -745,14 +753,9 @@ static uint64_t bc_get_reg(annotation_byte_code_t reg, ucontext_t * ctx, int all
     NEW_REGISTER_CASES(13);
     NEW_REGISTER_CASES(14);
     NEW_REGISTER_CASES(15);
-    case RBP:
-      return ctx->uc_mcontext.gregs[REG_RBP];
-    case EBP:
-      return REGISTER_EXTENDED(ctx->uc_mcontext.gregs[REG_RBP]);
-    case RIP:
-      return ctx->uc_mcontext.gregs[REG_RIP];
-    case RSP:
-      return ctx->uc_mcontext.gregs[REG_RSP];
+    P_REGISTER_CASES(B);
+    P_REGISTER_CASES(I);
+    P_REGISTER_CASES(S);
     case CS:
       return  ctx->uc_mcontext.gregs[REG_CSGSFS]        & 0xFFFF;
     case FS:
