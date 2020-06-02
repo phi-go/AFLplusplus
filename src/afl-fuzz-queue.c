@@ -100,6 +100,9 @@ void mark_as_redundant(afl_state_t *afl, struct queue_entry *q, u8 state) {
 
 }
 
+// #define CHECK_QUEUE
+
+#ifdef CHECK_QUEUE
 #define CHECK_QUEUE_VALID() \
   { \
     int cnt = 0; \
@@ -128,7 +131,7 @@ void mark_as_redundant(afl_state_t *afl, struct queue_entry *q, u8 state) {
       FATAL("cnt %d != queued_paths %d", cnt, afl->queued_paths); \
     } \
   }
-
+#endif // CHECK_QUEUE
 
 /* Append new test case to the queue. */
 
@@ -227,8 +230,9 @@ struct queue_entry * add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passe
 
   }
 
-  // check queue validity - TODO remove me
+#ifdef CHECK_QUEUE
   CHECK_QUEUE_VALID();
+#endif // CHECK_QUEUE
 
   return q;
 }
@@ -294,13 +298,16 @@ void remove_from_queue(afl_state_t *afl, struct queue_entry * q) {
     }
   }
 
+  zmq_send_queue_entry_removal(afl, q);
+
   ck_free(q->fname);
   ck_free(q->trace_mini);
   ck_free(q);
 
-
-  // check queue validity - TODO remove me
+#ifdef CHECK_QUEUE
   CHECK_QUEUE_VALID();
+#endif // CHECK_QUEUE
+
 }
 
 /* Destroy the entire queue. */

@@ -972,6 +972,7 @@ void   save_cmdline(afl_state_t *, u32, char **);
 void   connect_zmq(afl_state_t *);
 void   disconnect_zmq(afl_state_t *);
 void   zmq_send_file_path(afl_state_t *, char *, u64);
+void   zmq_send_queue_entry_removal(afl_state_t * afl, struct queue_entry * qe);
 void   zmq_send_exec_update(afl_state_t *, struct queue_entry *, u64);
 void   zmq_send_annotation_update(afl_state_t *, int ann_id, u64 pos, u64 new_best);
 void   zmq_handle_commands(afl_state_t *);

@@ -2457,6 +2457,18 @@ static int get_associated_annotation_id(afl_state_t * afl, struct queue_entry * 
   return id;
 }
 
+void zmq_send_queue_entry_removal(afl_state_t * afl, struct queue_entry * qe) {
+  if (afl->zmq_socket) {
+    zmq_maybe_wait_for_credit(afl);
+    z_send("F_QR", 4, ZMQ_SNDMORE);
+    z_send(qe->fname, strlen(qe->fname), 0);
+#ifdef CREDIT_DEBUG
+    SAYF("queue entry removal %d\n", afl->zmq_credit);
+#endif
+    zmq_dec_credit(afl);
+  }
+}
+
 void zmq_send_exec_update(afl_state_t * afl, struct queue_entry * cur_entry, u64 execs) {
   if (afl->zmq_socket) {
     int associated_ann_id = get_associated_annotation_id(afl, cur_entry);
