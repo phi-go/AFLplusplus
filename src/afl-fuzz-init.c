@@ -2819,6 +2819,7 @@ void adjust_active_annotations(afl_state_t * afl, int set_all_active) {
 }
 
 void exchange_new_queue_files(afl_state_t * afl) {
+  afl->stage_name = "ann exchange";
   adjust_active_annotations(afl, 1);
 
   s32 len, fd;
