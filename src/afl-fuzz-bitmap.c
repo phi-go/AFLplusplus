@@ -425,7 +425,7 @@ void minimize_bits(afl_state_t *afl, u8 *dst, u8 *src) {
 /* Construct a file name for a new test case, capturing the operation
    that led to its discovery. Returns a ptr to afl->describe_op_buf_256. */
 
-u8 *describe_op(afl_state_t *afl, u8 hnb) {
+u8 *describe_op(afl_state_t *afl, u8 hnb, int64_t hne) {
 
   u8 *ret = afl->describe_op_buf_256;
 
@@ -433,7 +433,6 @@ u8 *describe_op(afl_state_t *afl, u8 hnb) {
 
     sprintf(ret, "ann_sync_src:%06u,time:%llu",
             afl->queue_cur->id, get_cur_time() - afl->start_time);
-    return ret;
 
   } else if (unlikely(afl->syncing_party)) {
 
@@ -473,6 +472,9 @@ u8 *describe_op(afl_state_t *afl, u8 hnb) {
 
   }
 
+  if (hne > -1) {
+    sprintf(ret + strlen(ret), ",edge:%06lu", hne);
+  }
   if (hnb == 2) { strcat(ret, ",+cov"); }
 
   return ret;
@@ -572,6 +574,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
   if (unlikely(fault == afl->crash_mode)) {
 
     int ia = 0;
+    int64_t hne = -1; // has new edges
     // keep if annotations are improved
     if (get_head(&afl->active_annotations)->next) {
       LIST_FOREACH(&afl->active_annotations, annotation_t, {
@@ -625,6 +628,15 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
                 }
               }
               break;
+            case ANN_EDGE_COV:
+              {
+                if (!el->initialized) {
+                  hne = el->id;
+                  el->initialized = 1;
+                  zmq_send_annotation_update(afl, el->id, 0, 1);
+                }
+              }
+              break;
             default:
               FATAL("Unknown annotation type: %d", el->type);
           }
@@ -634,7 +646,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
           el->times_improved += improvement;
 
           queue_fn = alloc_printf("%s/queue/id:%06u,%s,ann:%d,impr:%d", afl->out_dir,
-                                  afl->total_queued_paths, describe_op(afl, 0),
+                                  afl->total_queued_paths, describe_op(afl, 0, -1),
                                   el->id, el->times_improved);
           fd = open(queue_fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
           if (unlikely(fd < 0)) PFATAL("Unable to create '%s'", queue_fn);
@@ -643,8 +655,12 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
           zmq_send_file_path(afl, queue_fn, /* execs */ 1);
 
-          add_to_queue(afl, queue_fn, len, 0, el, ann_best_for_pos,
-                       /* do not update level */ 1);
+          {
+            struct queue_entry *q = add_to_queue(afl, queue_fn, len, 0, el, ann_best_for_pos,
+                        /* do not update level */ 1);
+            q->trim_done = 1;  // As trimming only checks the aflpp instrumentation,
+                               // trimming can remove important information needed for annotations
+          }
 
           // if not initialized we are not fuzzing a queue file for this annotation
           // as this annotation can not have any queue files
@@ -653,6 +669,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
           if (!el->initialized) {  
             el->initialized = 1;
             disable_annotation(afl, el);
+            LIST_REMOVE_CURRENT_EL_IN_FOREACH();
           }
         }
       });
@@ -662,7 +679,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
        add to queue for future fuzzing, etc. */
     hnb = has_new_bits(afl, afl->virgin_bits);
       
-    if (!(hnb)) {
+    if (!(hnb || (hne > -1))) {
 
       if (unlikely(afl->crash_mode)) { ++afl->total_crashes; }
       return ia;
@@ -672,7 +689,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 #ifndef SIMPLE_FILES
 
     queue_fn = alloc_printf("%s/queue/id:%06u,%s", afl->out_dir,
-                            afl->total_queued_paths, describe_op(afl, hnb));
+                            afl->total_queued_paths, describe_op(afl, hnb, hne));
 
 #else
 
@@ -681,7 +698,11 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
 #endif                                                    /* ^!SIMPLE_FILES */
 
-    add_to_queue(afl, queue_fn, len, 0, NULL, NULL, 0);
+    {
+      struct queue_entry *q = add_to_queue(afl, queue_fn, len, 0, NULL, NULL, hnb==0);
+      q->trim_done = 1;  // As trimming only checks the aflpp instrumentation,
+                          // trimming can remove important information needed for annotations
+    }
 
     if (hnb == 2) {
 
@@ -707,6 +728,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", queue_fn); }
     ck_write(fd, mem, len, queue_fn);
     close(fd);
+
     zmq_send_file_path(afl, queue_fn, /* execs */ 1);
 
     keeping = 1;
@@ -767,7 +789,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 #ifndef SIMPLE_FILES
 
       snprintf(fn, PATH_MAX, "%s/hangs/id:%06llu,%s", afl->out_dir,
-               afl->unique_hangs, describe_op(afl, 0));
+               afl->unique_hangs, describe_op(afl, 0, -1));
 
 #else
 
@@ -812,7 +834,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
       snprintf(fn, PATH_MAX, "%s/crashes/id:%06llu,sig:%02u,%s", afl->out_dir,
                afl->unique_crashes, afl->fsrv.last_kill_signal,
-               describe_op(afl, 0));
+               describe_op(afl, 0, -1));
 
 #else
 

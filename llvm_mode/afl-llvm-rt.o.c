@@ -533,7 +533,7 @@ struct BBReq {
   X(END_FUNC) \
   \
   X(START_GOAL) \
-  X(GOAL_MIN) X(GOAL_SET) X(GOAL_MAX) \
+  X(GOAL_MIN) X(GOAL_SET) X(GOAL_MAX) X(GOAL_EDGE_COV) \
   X(END_GOAL) \
   \
   X(MAX_BYTE_CODE)
@@ -605,6 +605,8 @@ static annotation_t * annotations_map = NULL;
 static pos_actions_t * pos_actions_map = NULL;
 
 static __thread uint8_t * single_step_start_pos = NULL;
+static __thread action_t * edge_cov_action = NULL;
+static __thread uint64_t edge_cov_target = 0;
 
 static void set_breakpoint(action_t * action, int quiet) {
   if (!(*action->pos == 0xCC || *action->pos == (uint8_t)action->instruction_bytes[0])) {
@@ -976,6 +978,14 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
           annotation_res[byte_offset] |= (1 << (bit_offset));
         }
         break;
+      case GOAL_EDGE_COV:
+        {
+          uint64_t target;
+          BC_PEEK(target);
+          edge_cov_target = target;
+          edge_cov_action = action;
+        }
+        break;
       default:
         FPRINTF_TO_ERR_FILE("unhandled bc: %s(%d) \n", bc_str(byte_code[i-1]), byte_code[i-1]);
         return;
@@ -1040,6 +1050,21 @@ static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
     ctx->uc_mcontext.gregs[REG_EFL] &= ~0x100;
 
     single_step_start_pos = NULL;
+
+    if (edge_cov_action != NULL) {
+      uint8_t * pos = (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP];
+      if ((uint64_t)pos == edge_cov_target) {
+        annotation_t * annotation;
+        HASH_FIND_INT(annotations_map, &edge_cov_action->annotation_id, annotation);
+        NULL_CHECK(annotation);
+        NULL_CHECK(annotation->shm_addr);
+        shm_content_t * shm = annotation->shm_addr;
+        FPRINTF_TO_ERR_FILE("%d edge cov: %p target: %p\n", shm->num_writes_during_run, pos, edge_cov_target);
+        shm->num_writes_during_run = 1;
+      }
+      edge_cov_action = NULL;
+      edge_cov_target = 0;
+    }
   }
 }
 
@@ -1079,7 +1104,7 @@ static void remove_annotation(int annotation_id) {
   annotation_t * annotation;
   HASH_FIND_INT(annotations_map, &annotation_id, annotation);
   if (annotation == NULL) {
-      FPRINTF_TO_ERR_FILE("expected annotation for %p to exist\n", annotation_id);
+      FPRINTF_TO_ERR_FILE("expected annotation for %d to exist\n", annotation_id);
       _exit(1);
   }
 

@@ -120,7 +120,7 @@ extern s16 interesting_16[INTERESTING_8_LEN + INTERESTING_16_LEN];
 extern s32
     interesting_32[INTERESTING_8_LEN + INTERESTING_16_LEN + INTERESTING_32_LEN];
 
-typedef enum {ANN_MIN, ANN_SET, ANN_MAX} annotation_type_t;
+typedef enum {ANN_MIN, ANN_SET, ANN_MAX, ANN_EDGE_COV} annotation_type_t;
 
 struct queue_entry;
 
@@ -905,7 +905,7 @@ void classify_counts(afl_forkserver_t *);
 void init_count_class16(void);
 void minimize_bits(afl_state_t *, u8 *, u8 *);
 #ifndef SIMPLE_FILES
-u8 *describe_op(afl_state_t *, u8);
+u8 *describe_op(afl_state_t *, u8, int64_t);
 #endif
 u8 save_if_interesting(afl_state_t *, void *, u32, u8);
 u8 has_new_bits(afl_state_t *, u8 *);
