@@ -1162,7 +1162,14 @@ static void handle_ann_req(void) {
     _exit(1);
   }
   HASH_ADD_INT(annotations_map, id, ann);
-  HASH_ADD(hh_active, active_annotations_map, id, sizeof(int), ann);
+
+  {
+    annotation_t * active_ann;
+    HASH_FIND(hh_active, active_annotations_map, &ann->id, sizeof(int), active_ann);
+    if (active_ann == NULL) {
+      HASH_ADD(hh_active, active_annotations_map, id, sizeof(int), ann);
+    }
+  }
 
   // get all actions for that bb_annotation
   while (1) {
