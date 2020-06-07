@@ -587,12 +587,13 @@ typedef struct action {
   struct action * pos_next;
 } action_t;
 
-typedef struct {
+typedef struct annotation {
   int id;
   int shm_id;
   shm_content_t * shm_addr;
   action_t * actions;
   UT_hash_handle hh;
+  UT_hash_handle hh_active;
 } annotation_t;
 
 typedef struct {
@@ -602,6 +603,7 @@ typedef struct {
 } pos_actions_t;
 
 static annotation_t * annotations_map = NULL;
+static annotation_t * active_annotations_map = NULL;
 static pos_actions_t * pos_actions_map = NULL;
 
 static __thread uint8_t * single_step_start_pos = NULL;
@@ -1059,7 +1061,6 @@ static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
         NULL_CHECK(annotation);
         NULL_CHECK(annotation->shm_addr);
         shm_content_t * shm = annotation->shm_addr;
-        FPRINTF_TO_ERR_FILE("%d edge cov: %p target: %p\n", shm->num_writes_during_run, pos, edge_cov_target);
         shm->num_writes_during_run = 1;
       }
       edge_cov_action = NULL;
@@ -1106,6 +1107,12 @@ static void remove_annotation(int annotation_id) {
   if (annotation == NULL) {
       FPRINTF_TO_ERR_FILE("expected annotation for %d to exist\n", annotation_id);
       _exit(1);
+  }
+
+  annotation_t * active_ann;
+  HASH_FIND(hh_active, active_annotations_map, &annotation->id, sizeof(int), active_ann);
+  if (active_ann != NULL) {
+    HASH_DELETE(hh_active, active_annotations_map, annotation);
   }
 
   // for all actions belonging to annotation find them and remove them
@@ -1155,6 +1162,7 @@ static void handle_ann_req(void) {
     _exit(1);
   }
   HASH_ADD_INT(annotations_map, id, ann);
+  HASH_ADD(hh_active, active_annotations_map, id, sizeof(int), ann);
 
   // get all actions for that bb_annotation
   while (1) {
@@ -1213,11 +1221,18 @@ static void handle_deann_req(void) {
 }
 
 static void handle_activate_annotation() {
-  int id = 0;
+  int id = -1;
   read_from_command_pipe(id);
   annotation_t * annotation;
   HASH_FIND_INT(annotations_map, &id, annotation);
   NULL_CHECK(annotation);
+
+  annotation_t * active_ann;
+  HASH_FIND(hh_active, active_annotations_map, &id, sizeof(int), active_ann);
+  if (active_ann == NULL) {
+    HASH_ADD(hh_active, active_annotations_map, id, sizeof(int), annotation);
+  }
+
   action_t * act = NULL;
   LL_FOREACH2(annotation->actions, act, annotation_next) {
       set_breakpoint(act, /*quiet*/ 1);
@@ -1225,11 +1240,19 @@ static void handle_activate_annotation() {
 }
 
 static void handle_deactivate_annotation() {
-  int id = 0;
+  int id = -1;
   read_from_command_pipe(id);
   annotation_t * annotation;
   HASH_FIND_INT(annotations_map, &id, annotation);
   NULL_CHECK(annotation);
+
+  annotation_t * active_ann;
+  HASH_FIND(hh_active, active_annotations_map, &id, sizeof(int), active_ann);
+  if (active_ann != NULL) {
+    annotation->shm_addr->num_writes_during_run = 0;
+    HASH_DELETE(hh_active, active_annotations_map, annotation);
+  }
+
   action_t * act = NULL;
   LL_FOREACH2(annotation->actions, act, annotation_next) {
       remove_breakpoint(act, /*quiet*/ 1);
@@ -1396,10 +1419,10 @@ static void __afl_start_forkserver(void) {
       /* Once woken up, create a clone of our process and reset annotations. */
 
       {
-        annotation_t * ann;
-        for (ann = annotations_map; ann != NULL; ann=ann->hh.next) {
-          ann->shm_addr->num_writes_during_run = 0;
-        }
+        annotation_t * ann, * tmp_ann;
+          HASH_ITER(hh_active, active_annotations_map, ann, tmp_ann) {
+            ann->shm_addr->num_writes_during_run = 0;
+          }
       }
 
       child_pid = fork();
