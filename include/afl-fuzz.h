@@ -120,7 +120,7 @@ extern s16 interesting_16[INTERESTING_8_LEN + INTERESTING_16_LEN];
 extern s32
     interesting_32[INTERESTING_8_LEN + INTERESTING_16_LEN + INTERESTING_32_LEN];
 
-typedef enum {ANN_MIN, ANN_SET, ANN_MAX, ANN_EDGE_COV} annotation_type_t;
+typedef enum {ANN_MIN, ANN_SET, ANN_MAX, ANN_EDGE_COV, ANN_EDGE_MEM_COV} annotation_type_t;
 
 struct queue_entry;
 

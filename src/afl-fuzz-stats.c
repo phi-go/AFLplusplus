@@ -905,7 +905,7 @@ void show_stats(afl_state_t *afl) {
          "active annotations:");
     SAYF(SET_G1 bSTG bV);
     LIST_FOREACH(&afl->active_annotations, annotation_t, {
-      if (el->type != ANN_EDGE_COV) {
+      if (el->type != ANN_EDGE_COV && el->type != ANN_EDGE_MEM_COV) {
         if (i++ < 40) {
           PRINT_ANNOTATION()
         }
@@ -920,7 +920,7 @@ void show_stats(afl_state_t *afl) {
     SAYF(SET_G1 bSTG bV);
     LIST_FOREACH(&afl->all_annotations, annotation_t, {
       total++;
-      if (el->type != ANN_EDGE_COV) {
+      if (el->type != ANN_EDGE_COV && el->type != ANN_EDGE_MEM_COV) {
         if (i++ < 40) {
           PRINT_ANNOTATION()
         }

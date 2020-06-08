@@ -2582,6 +2582,9 @@ static void __zmq_annotation_req(afl_state_t * afl) {
     case ANN_EDGE_COV:
       memset(ann->cur_best.best_values, 0, sizeof(ann->cur_best.best_values));
       break;
+    case ANN_EDGE_MEM_COV:
+      memset(ann->cur_best.set_hash_map, 0, sizeof(ann->cur_best.set_hash_map));
+      break;
     default:
       FATAL("Unknown annotation type %d", ann->type);
   }
@@ -2718,6 +2721,7 @@ void clean_up_annotation_queue_files(afl_state_t * afl) {
         // take care of qe->ann_pos when deleting
           break;
         case ANN_EDGE_COV:
+        case ANN_EDGE_MEM_COV:
           // has no own queue files so do nothing
           break;
         default:
@@ -2810,7 +2814,7 @@ void adjust_active_annotations(afl_state_t * afl, int set_all_active) {
   if (get_head(&afl->all_annotations)->next) {
     LIST_FOREACH(&afl->all_annotations, annotation_t, {
       if (set_all_active ||
-          (!el->initialized && el->type != ANN_EDGE_COV) ||
+          (!el->initialized && el->type != ANN_EDGE_COV && el->type != ANN_EDGE_MEM_COV) ||
           queue_entry_belongs_to_ann(el, afl->queue_cur)) {
         list_append(&afl->active_annotations, el);
       }

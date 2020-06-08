@@ -533,7 +533,7 @@ struct BBReq {
   X(END_FUNC) \
   \
   X(START_GOAL) \
-  X(GOAL_MIN) X(GOAL_SET) X(GOAL_MAX) X(GOAL_EDGE_COV) \
+  X(GOAL_MIN) X(GOAL_SET) X(GOAL_MAX) X(GOAL_EDGE_COV) X(GOAL_EDGE_MEM_COV) \
   X(END_GOAL) \
   \
   X(MAX_BYTE_CODE)
@@ -852,6 +852,31 @@ static uint64_t bc_get_mem(annotation_byte_code_t segment_reg,
   }
 }
 
+static void set_bit_in_hashmap(uint64_t x, shm_content_t * shm, int verbose) {
+  uint8_t * annotation_res = shm->result.set_hash_map;
+
+  if (verbose) { FPRINTF_TO_ERR_FILE("num write: %d ", shm->num_writes_during_run); }
+  if (verbose) { FPRINTF_TO_ERR_FILE("val: %llx ", x); }
+
+  // hash it
+  x = (x ^ (x >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
+  x = (x ^ (x >> 27)) * UINT64_C(0x94d049bb133111eb);
+  x = x ^ (x >> 31);
+
+  if (verbose) { FPRINTF_TO_ERR_FILE("hashed: %llx ", x); }
+
+  x = x % (sizeof(shm->result.set_hash_map)*8);
+  if (verbose) { FPRINTF_TO_ERR_FILE("comp: %llx ", x); }
+
+  int byte_offset = x/8;
+  int bit_offset = x%8;
+  if (verbose) { FPRINTF_TO_ERR_FILE("byte_off: %d bit_off: %d\n", byte_offset, bit_offset); }
+
+  annotation_res[byte_offset] |= (1 << (bit_offset));
+
+  shm->num_writes_during_run++;
+}
+
 static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_len,
                      ucontext_t * ctx, action_t * action, int verbose) {
   uint64_t i = 0;
@@ -961,23 +986,9 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
           NULL_CHECK(annotation);
           NULL_CHECK(annotation->shm_addr);
           shm_content_t * shm = annotation->shm_addr;
-          uint8_t * annotation_res = shm->result.set_hash_map;
           uint64_t x;
           BC_PEEK(x);
-          if (verbose) { FPRINTF_TO_ERR_FILE("num write: %d ", shm->num_writes_during_run); }
-          if (verbose) { FPRINTF_TO_ERR_FILE("val: %llx ", x); }
-          // hash it
-          x = (x ^ (x >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
-          x = (x ^ (x >> 27)) * UINT64_C(0x94d049bb133111eb);
-          x = x ^ (x >> 31);
-          if (verbose) { FPRINTF_TO_ERR_FILE("hashed: %llx ", x); }
-          x = x % (sizeof(shm->result.set_hash_map)*8);
-          if (verbose) { FPRINTF_TO_ERR_FILE("comp: %llx ", x); }
-          int byte_offset = x/8;
-          int bit_offset = x%8;
-          if (verbose) { FPRINTF_TO_ERR_FILE("byte_off: %d bit_off: %d\n", byte_offset, bit_offset); }
-          shm->num_writes_during_run++;
-          annotation_res[byte_offset] |= (1 << (bit_offset));
+          set_bit_in_hashmap(x, shm, verbose);
         }
         break;
       case GOAL_EDGE_COV:
@@ -985,6 +996,14 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
           uint64_t target;
           BC_PEEK(target);
           edge_cov_target = target;
+          edge_cov_action = action;
+        }
+        break;
+      case GOAL_EDGE_MEM_COV:
+        {
+          uint64_t target;
+          BC_PEEK(target);
+          edge_cov_target = 0;  // In band signal for unknown targets, new ones are important.
           edge_cov_action = action;
         }
         break;
@@ -1055,14 +1074,24 @@ static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
 
     if (edge_cov_action != NULL) {
       uint8_t * pos = (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP];
-      if ((uint64_t)pos == edge_cov_target) {
+      if (edge_cov_target == 0) {
         annotation_t * annotation;
         HASH_FIND_INT(annotations_map, &edge_cov_action->annotation_id, annotation);
         NULL_CHECK(annotation);
         NULL_CHECK(annotation->shm_addr);
         shm_content_t * shm = annotation->shm_addr;
-        shm->num_writes_during_run = 1;
+        set_bit_in_hashmap((uint64_t)pos, shm, 1);
+      } else {
+        if ((uint64_t)pos == edge_cov_target) {
+          annotation_t * annotation;
+          HASH_FIND_INT(annotations_map, &edge_cov_action->annotation_id, annotation);
+          NULL_CHECK(annotation);
+          NULL_CHECK(annotation->shm_addr);
+          shm_content_t * shm = annotation->shm_addr;
+          shm->num_writes_during_run = 1;
+        }
       }
+
       edge_cov_action = NULL;
       edge_cov_target = 0;
     }

@@ -637,6 +637,25 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
                 }
               }
               break;
+            case ANN_EDGE_MEM_COV:
+              {
+                uint8_t * bitmap = el->shm_addr->result.set_hash_map;
+                uint8_t * cur_best_map = el->cur_best.set_hash_map;
+                for(int i = 0; i < sizeof(el->shm_addr->result.set_hash_map); i++) {
+                  int cur_best = __builtin_popcount(cur_best_map[i]);
+                  int contender = __builtin_popcount(cur_best_map[i] | bitmap[i]);
+                  if (contender > cur_best) {
+                      el->cur_best.set_hash_map[i] |= bitmap[i];
+                      improvement += contender-cur_best;
+                  }
+                }
+                if (improvement) {
+                  zmq_send_annotation_update(afl, el->id, 0, improvement);
+                  hne = el->id;
+                }
+                improvement = 0; // not a normal annotation, it does not get own queue files
+              }
+              break;
             default:
               FATAL("Unknown annotation type: %d", el->type);
           }
