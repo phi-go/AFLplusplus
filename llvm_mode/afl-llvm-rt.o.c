@@ -1001,8 +1001,6 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
         break;
       case GOAL_EDGE_MEM_COV:
         {
-          uint64_t target;
-          BC_PEEK(target);
           edge_cov_target = 0;  // In band signal for unknown targets, new ones are important.
           edge_cov_action = action;
         }
@@ -1080,7 +1078,7 @@ static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
         NULL_CHECK(annotation);
         NULL_CHECK(annotation->shm_addr);
         shm_content_t * shm = annotation->shm_addr;
-        set_bit_in_hashmap((uint64_t)pos, shm, 1);
+        set_bit_in_hashmap((uint64_t)pos, shm, 0);
       } else {
         if ((uint64_t)pos == edge_cov_target) {
           annotation_t * annotation;
