@@ -136,7 +136,7 @@ void mark_as_redundant(afl_state_t *afl, struct queue_entry *q, u8 state) {
 /* Append new test case to the queue. */
 
 struct queue_entry * add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det,
-                                  annotation_t * ann,
+                                  annotation_t * ann, int ann_candidate,
                                   u8 ann_best_for_pos[ANNOTATION_RESULT_SIZE],
                                   int_fast8_t ignore_depth) {
   struct queue_entry *q = ck_alloc(sizeof(struct queue_entry));
@@ -160,6 +160,10 @@ struct queue_entry * add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passe
     ann->new_ann_queue_files = 1;
     q->ann_pos = ++ann->num_corresponding_queue_files;
     ann->newest_qe = q;
+    q->ann_candidate = ann_candidate;
+  }
+  if (!q->ann_candidate) {
+    ++afl->totals_fuzz_level[0];
   }
   if(!ignore_depth) {
     q->depth = afl->cur_depth + 1;
@@ -288,7 +292,9 @@ void remove_from_queue(afl_state_t *afl, struct queue_entry * q) {
   if (!q->was_fuzzed) --afl->pending_not_fuzzed;
   if (q->favored && afl->pending_favored > 0) --afl->pending_favored; // dont go below zero
 
-  afl->total_fuzz_level -= q->fuzz_level;
+  if (!q->ann_candidate) {
+    --afl->totals_fuzz_level[calculate_fuzz_bucket(q->fuzz_level)];
+  }
   --afl->queued_paths;
 
   for (int i = 0; i < afl->fsrv.map_size; ++i) {

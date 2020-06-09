@@ -898,11 +898,24 @@ void show_stats(afl_state_t *afl) {
       FATAL("unknown annotation type %d", el->type); \
   }
 
+  {
+    int length = 0;
+    SAYF("\n" bV bSTOP cGRA);
+    SAYF(" %-74s ", "fuzz levels:");
+    SAYF(SET_G1 bSTG bV);
+    SAYF("\n" bV bSTOP cRST);
+    for (int i = 0; i < NUM_FUZZ_BUCKETS; i++) {
+      if (length > 75) { break; }
+      length+= sprintf(tmp+length, "%d ", afl->totals_fuzz_level[i]);
+    }
+    SAYF(" %-74.74s ", tmp); \
+    SAYF(SET_G1 bSTG bV); \
+  }
+
   int i = 0;
   if (get_head(&afl->active_annotations)->next) {
     SAYF("\n" bV bSTOP cGRA);
-    SAYF(" (avg fuzz level: %9.4f) %-46s ", (double)afl->total_fuzz_level / afl->queued_paths,
-         "active annotations:");
+    SAYF(" %-74s ", "active annotations:");
     SAYF(SET_G1 bSTG bV);
     LIST_FOREACH(&afl->active_annotations, annotation_t, {
       if (el->type != ANN_EDGE_COV && el->type != ANN_EDGE_MEM_COV) {

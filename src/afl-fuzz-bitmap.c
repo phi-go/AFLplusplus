@@ -685,11 +685,10 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
           zmq_send_file_path(afl, queue_fn, /* execs */ 1);
 
           {
-            struct queue_entry *q = add_to_queue(afl, queue_fn, len, 0, el, ann_best_for_pos,
+            struct queue_entry *q = add_to_queue(afl, queue_fn, len, 0, el, candidate, ann_best_for_pos,
                         /* do not update level */ 1);
             q->trim_done = 1;  // As trimming only checks the aflpp instrumentation,
                                // trimming can remove important information needed for annotations
-            q->ann_candidate = candidate;
           }
 
           // if not initialized we are not fuzzing a queue file for this annotation
@@ -729,7 +728,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 #endif                                                    /* ^!SIMPLE_FILES */
 
     {
-      struct queue_entry *q = add_to_queue(afl, queue_fn, len, 0, NULL, NULL, hnb==0);
+      struct queue_entry *q = add_to_queue(afl, queue_fn, len, 0, NULL, 0, NULL, hnb==0);
       q->trim_done = 1;  // As trimming only checks the aflpp instrumentation,
                           // trimming can remove important information needed for annotations
     }

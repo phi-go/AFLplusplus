@@ -2507,8 +2507,13 @@ abandon_entry:
 
   }
 
+  if (!afl->queue_cur->ann_candidate) {
+    --afl->totals_fuzz_level[calculate_fuzz_bucket(afl->queue_cur->fuzz_level)];
+  }
   ++afl->queue_cur->fuzz_level;
-  ++afl->total_fuzz_level;
+  if (!afl->queue_cur->ann_candidate) {
+    ++afl->totals_fuzz_level[calculate_fuzz_bucket(afl->queue_cur->fuzz_level)];
+  }
 
   munmap(orig_in, afl->queue_cur->len);
   zmq_send_exec_update(afl, afl->queue_cur, afl->fsrv.total_execs - num_exec_start);

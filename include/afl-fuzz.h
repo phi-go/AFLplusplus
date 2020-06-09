@@ -121,6 +121,7 @@ extern s32
     interesting_32[INTERESTING_8_LEN + INTERESTING_16_LEN + INTERESTING_32_LEN];
 
 typedef enum {ANN_MIN, ANN_SET, ANN_MAX, ANN_EDGE_COV, ANN_EDGE_MEM_COV} annotation_type_t;
+#define NUM_FUZZ_BUCKETS 16
 
 struct queue_entry;
 
@@ -502,7 +503,7 @@ typedef struct afl_state {
       current_entry,                    /* Current queue entry ID           */
       havoc_div;                        /* Cycle count divisor for havoc    */
 
-  u64 total_fuzz_level;                 /* Toal of fuzz level of queue files, used to skip to fresh qf */
+  u32 totals_fuzz_level[NUM_FUZZ_BUCKETS];            /* Totals of fuzz levels of queue files, used to skip to fresh qf */
 
   u64 total_crashes,                    /* Total number of crashes          */
       unique_crashes,                   /* Crashes with unique signatures   */
@@ -882,7 +883,7 @@ void   deinit_py(void *);
 void mark_as_det_done(afl_state_t *, struct queue_entry *);
 void mark_as_variable(afl_state_t *, struct queue_entry *);
 void mark_as_redundant(afl_state_t *, struct queue_entry *, u8);
-struct queue_entry * add_to_queue(afl_state_t *, u8 *, u32, u8, annotation_t *,
+struct queue_entry * add_to_queue(afl_state_t *, u8 *, u32, u8, annotation_t *, int,
                                   u8 ann_best_for_pos[ANNOTATION_RESULT_SIZE], int_fast8_t);
 void remove_from_queue(afl_state_t *, struct queue_entry *);
 void destroy_queue(afl_state_t *);
@@ -979,6 +980,7 @@ void   zmq_send_annotation_update(afl_state_t *, int ann_id, u64 pos, u64 new_be
 void   zmq_handle_commands(afl_state_t *);
 void   remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann);
 void   clean_up_annotation_queue_files(afl_state_t * afl);
+int    calculate_fuzz_bucket(int fuzz_level);
 int    skip_queue_file(afl_state_t * afl, struct queue_entry * qe);
 void   disable_annotation(afl_state_t * afl, annotation_t * ann);
 void   adjust_active_annotations(afl_state_t * afl, int);

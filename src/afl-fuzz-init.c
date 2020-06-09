@@ -445,7 +445,7 @@ void read_testcases(afl_state_t *afl) {
 
     if (!access(dfn, F_OK)) { passed_det = 1; }
 
-    add_to_queue(afl, fn2, st.st_size, passed_det, NULL, NULL, 0);
+    add_to_queue(afl, fn2, st.st_size, passed_det, NULL, 0, NULL, 0);
 
   }
 
@@ -2684,6 +2684,21 @@ static void leave_best_min_max_annotation_queue_files(afl_state_t * afl, annotat
   ann->new_ann_queue_files = 0;
 }
 
+int calculate_fuzz_bucket(int fuzz_level) {
+  int res;
+  if (fuzz_level <= 0) {
+    res = 0;
+  } else {
+    int l = log2(fuzz_level)+1;
+    if (l >= NUM_FUZZ_BUCKETS-1) {
+      res = NUM_FUZZ_BUCKETS-1;
+    } else {
+      res = l;
+    }
+  }
+  return res;
+}
+
 int skip_queue_file(afl_state_t * afl, struct queue_entry * qe) {
   // template for more complicated skip conditions
   // if (qe->ann == NULL) {
@@ -2710,7 +2725,17 @@ int skip_queue_file(afl_state_t * afl, struct queue_entry * qe) {
   }
 
   // skip if less fuzzed queue entries are available
-  return qe->fuzz_level > (double)afl->total_fuzz_level / afl->queued_paths;
+  int qe_fuzz_bucket = calculate_fuzz_bucket(qe->fuzz_level);
+  for (int i = 0; i < NUM_FUZZ_BUCKETS; i++) {
+    if (afl->totals_fuzz_level[i] > 0) {
+      if (qe_fuzz_bucket > i) {
+        return 1;
+      } else {
+        return 0;
+      }
+    }
+  }
+  return 0;
 }
 
 void clean_up_annotation_queue_files(afl_state_t * afl) {
