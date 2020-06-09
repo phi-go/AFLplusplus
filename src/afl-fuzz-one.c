@@ -428,13 +428,13 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
   adjust_active_annotations(afl, 0);
 
-  if (unlikely(afl->not_on_tty)) {
+  // if (unlikely(afl->not_on_tty)) {
 
-    ACTF("Fuzzing test case #%u (%u total, %llu uniq crashes found)...",
-         afl->current_entry, afl->queued_paths, afl->unique_crashes);
-    fflush(stdout);
+  //   ACTF("Fuzzing test case #%u (%u total, %llu uniq crashes found)...",
+  //        afl->current_entry, afl->queued_paths, afl->unique_crashes);
+  //   fflush(stdout);
 
-  }
+  // }
 
   /* Map the test case into memory. */
 
@@ -2586,13 +2586,13 @@ static u8 mopt_common_fuzzing(afl_state_t *afl, MOpt_globals_t MOpt_globals) {
 
 #endif                                                     /* ^IGNORE_FINDS */
 
-  if (afl->not_on_tty) {
+  // if (afl->not_on_tty) {
 
-    ACTF("Fuzzing test case #%u (%u total, %llu uniq crashes found)...",
-         afl->current_entry, afl->queued_paths, afl->unique_crashes);
-    fflush(stdout);
+  //   ACTF("Fuzzing test case #%u (%u total, %llu uniq crashes found)...",
+  //        afl->current_entry, afl->queued_paths, afl->unique_crashes);
+  //   fflush(stdout);
 
-  }
+  // }
 
   /* Map the test case into memory. */
 

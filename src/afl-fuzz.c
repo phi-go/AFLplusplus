@@ -1265,12 +1265,12 @@ int main(int argc, char **argv_orig, char **envp) {
 
       // show_stats(afl);
 
-      if (unlikely(afl->not_on_tty)) {
+      // if (unlikely(afl->not_on_tty)) {
 
-        ACTF("Entering queue cycle %llu.", afl->queue_cycle);
-        fflush(stdout);
+      //   ACTF("Entering queue cycle %llu.", afl->queue_cycle);
+      //   fflush(stdout);
 
-      }
+      // }
 
       /* If we had a full queue cycle with no new finds, try
          recombination strategies next. */
