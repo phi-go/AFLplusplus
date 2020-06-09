@@ -2703,8 +2703,13 @@ int skip_queue_file(afl_state_t * afl, struct queue_entry * qe) {
   //   }
   // }
 
-  // skip if less fuzzed queue entries are available
+  if (qe->fuzz_level > 0 && qe->ann_candidate && rand_below(afl, 20) != 0) {
+    // candidates have 1 in 20 chance to get fuzzed, many annotations can never get better
+    // after their initial value, this is to limit their impact on performance
+    return 1;
+  }
 
+  // skip if less fuzzed queue entries are available
   return qe->fuzz_level > (double)afl->total_fuzz_level / afl->queued_paths;
 }
 

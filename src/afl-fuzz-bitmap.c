@@ -579,6 +579,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     if (get_head(&afl->active_annotations)->next) {
       LIST_FOREACH(&afl->active_annotations, annotation_t, {
         int improvement = 0;
+        int candidate = 0;
         u8 ann_best_for_pos[ANNOTATION_RESULT_SIZE] = { 0 };
         uint64_t num_writes = el->shm_addr->num_writes_during_run;
         if (num_writes) {
@@ -588,6 +589,9 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
                 for (int i = 0; i < num_writes; i++) {
                   uint64_t contender = el->shm_addr->result.best_values[i];
                   if (contender < el->cur_best.best_values[i]) {
+                    if (el->cur_best.best_values[i] == UINT64_MAX) {
+                      candidate = 1;
+                    }
                     el->cur_best.best_values[i] = contender;
                     improvement += 1;
                     if (i > el->max_pos) { el->max_pos = i; }
@@ -602,6 +606,9 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
                 for (int i = 0; i < num_writes; i++) {
                   uint64_t contender = el->shm_addr->result.best_values[i];
                   if (contender > el->cur_best.best_values[i]) {
+                    if (el->cur_best.best_values[i] == 0) {
+                      candidate = 1;
+                    }
                     el->cur_best.best_values[i] = contender;
                     improvement += 1;
                     if (i > el->max_pos) { el->max_pos = i; }
@@ -619,6 +626,9 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
                   int cur_best = __builtin_popcount(cur_best_map[i]);
                   int contender = __builtin_popcount(cur_best_map[i] | bitmap[i]);
                   if (contender > cur_best) {
+                      if (el->times_improved == 0) {
+                        candidate = 1;
+                      }
                       el->cur_best.set_hash_map[i] |= bitmap[i];
                       improvement += contender-cur_best;
                   }
@@ -679,6 +689,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
                         /* do not update level */ 1);
             q->trim_done = 1;  // As trimming only checks the aflpp instrumentation,
                                // trimming can remove important information needed for annotations
+            q->ann_candidate = candidate;
           }
 
           // if not initialized we are not fuzzing a queue file for this annotation

@@ -156,6 +156,7 @@ struct queue_entry {
 
   u32 bitmap_size,                      /* Number of bits set in bitmap     */
       fuzz_level,                       /* Number of fuzzing iterations     */
+      ann_candidate,                    /* First found queue file for an annotation */
       id,                               /* Queue entry id                   */
       exec_cksum;                       /* Checksum of the execution trace  */
 
