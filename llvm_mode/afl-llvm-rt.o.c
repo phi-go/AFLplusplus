@@ -665,6 +665,8 @@ static void remove_breakpoint(action_t * action, int quiet) {
     return ctx->uc_mcontext.gregs[REG_R##NAME##X]; \
   case E##NAME##X: \
     return REGISTER_EXTENDED(ctx->uc_mcontext.gregs[REG_R##NAME##X]); \
+  case NAME##X: \
+    return REGISTER_16BIT(ctx->uc_mcontext.gregs[REG_R##NAME##X]); \
   case NAME##H: \
     return REGISTER_HIGHER(ctx->uc_mcontext.gregs[REG_R##NAME##X]); \
   case NAME##L: \
@@ -676,7 +678,7 @@ static void remove_breakpoint(action_t * action, int quiet) {
   case E##NAME##I: \
     return REGISTER_EXTENDED(ctx->uc_mcontext.gregs[REG_R##NAME##I]); \
   case NAME##I: \
-    return REGISTER_HIGHER(ctx->uc_mcontext.gregs[REG_R##NAME##I]); \
+    return REGISTER_16BIT(ctx->uc_mcontext.gregs[REG_R##NAME##I]); \
   case NAME##IL: \
     return REGISTER_LOWER(ctx->uc_mcontext.gregs[REG_R##NAME##I]);
 
@@ -686,7 +688,17 @@ static void remove_breakpoint(action_t * action, int quiet) {
   case E##NAME##P: \
     return REGISTER_EXTENDED(ctx->uc_mcontext.gregs[REG_R##NAME##P]); \
   case NAME##P: \
+    return REGISTER_16BIT(ctx->uc_mcontext.gregs[REG_R##NAME##P]); \
+  case NAME##PL: \
     return REGISTER_LOWER(ctx->uc_mcontext.gregs[REG_R##NAME##P]);
+
+#define P_WITHOUT_L_REGISTER_CASES(NAME) \
+  case R##NAME##P: \
+    return ctx->uc_mcontext.gregs[REG_R##NAME##P]; \
+  case E##NAME##P: \
+    return REGISTER_EXTENDED(ctx->uc_mcontext.gregs[REG_R##NAME##P]); \
+  case NAME##P: \
+    return REGISTER_16BIT(ctx->uc_mcontext.gregs[REG_R##NAME##P]);
 
 #define NEW_REGISTER_CASES(NAME) \
   case R##NAME: \
@@ -758,8 +770,8 @@ static uint64_t bc_get_reg(annotation_byte_code_t reg, ucontext_t * ctx, int all
     NEW_REGISTER_CASES(14);
     NEW_REGISTER_CASES(15);
     P_REGISTER_CASES(B);
-    P_REGISTER_CASES(I);
     P_REGISTER_CASES(S);
+    P_WITHOUT_L_REGISTER_CASES(I);
     case CS:
       return  ctx->uc_mcontext.gregs[REG_CSGSFS]        & 0xFFFF;
     case FS:
