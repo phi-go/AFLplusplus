@@ -460,22 +460,34 @@ FILE * put_err_log_fp = NULL;
     } \
   } while(0)
 
-#define read_from_command_pipe(V) \
-    if ((read(FORKSRV_FD + 2, &V, sizeof(V)) != sizeof(V))) { \
+#define READ_FROM_COMMAND_PIPE__BASE(ERR, V, S) \
+    if ((read(FORKSRV_FD + 2, V, S) != S)) { \
       FPRINTF_TO_ERR_FILE("command read failed %s:%d\n", __FILE__, __LINE__); \
-      _exit(1); \
+      ERR = 1; \
     }
 
 #define READ_FROM_COMMAND_PIPE2(V, S) \
-    if ((read(FORKSRV_FD + 2, V, S) != S)) { \
-      FPRINTF_TO_ERR_FILE("command read failed %s:%d\n", __FILE__, __LINE__); \
-      _exit(1); \
-    }
+  do { \
+    int err = 0; \
+    READ_FROM_COMMAND_PIPE__BASE(err, V, S); \
+    if (err) { \
+      abort(); \
+    } \
+  } while(0)
 
-#define write_to_command_pipe(V, S) \
+#define READ_FROM_COMMAND_PIPE(V) \
+  do { \
+    int err = 0; \
+    READ_FROM_COMMAND_PIPE__BASE(err, &V, sizeof(V)); \
+    if (err) { \
+      abort(); \
+    } \
+  } while(0)
+
+#define WRITE_TO_COMMAND_PIPE(V, S) \
     if ((write(FORKSRV_FD + 3, V, S) != S)) { \
       FPRINTF_TO_ERR_FILE("command write failed %s:%d\n", __FILE__, __LINE__); \
-      _exit(1); \
+      abort(); \
     }
 
 #define NULL_CHECK(P) \
@@ -1135,8 +1147,8 @@ static void print_annotations() {
 
 static void handle_bb_req() {
   struct BBReq req;
-  read_from_command_pipe(req);
-  write_to_command_pipe(req.pos, req.size);
+  READ_FROM_COMMAND_PIPE(req);
+  WRITE_TO_COMMAND_PIPE(req.pos, req.size);
 }
 
 static void remove_annotation(int annotation_id) {
@@ -1193,8 +1205,8 @@ static void handle_ann_req(void) {
   annotation_t * ann = calloc(1, sizeof(*ann));
   NULL_CHECK(ann);
   ann->actions = NULL;
-  read_from_command_pipe(ann->id);
-  read_from_command_pipe(ann->shm_id);
+  READ_FROM_COMMAND_PIPE(ann->id);
+  READ_FROM_COMMAND_PIPE(ann->shm_id);
   ann->shm_addr = shmat(ann->shm_id, NULL, 0);
   if (ann->shm_addr == (void *) -1) {
     perror("could not get shm segment");
@@ -1213,7 +1225,7 @@ static void handle_ann_req(void) {
   // get all actions for that bb_annotation
   while (1) {
     uint8_t * action_pos = 0;
-    read_from_command_pipe(action_pos);
+    READ_FROM_COMMAND_PIPE(action_pos);
     if (action_pos == NULL) {
       break;
     }
@@ -1221,9 +1233,9 @@ static void handle_ann_req(void) {
     action_t * action = calloc(1, sizeof(*action));
     NULL_CHECK(action);
     action->pos = action_pos;
-    read_from_command_pipe(action->instruction_size);
+    READ_FROM_COMMAND_PIPE(action->instruction_size);
     READ_FROM_COMMAND_PIPE2(&action->instruction_bytes, action->instruction_size);
-    read_from_command_pipe(action->byte_code_len);
+    READ_FROM_COMMAND_PIPE(action->byte_code_len);
     annotation_byte_code_t * action_byte_code = calloc(action->byte_code_len, sizeof(*action_byte_code));
     NULL_CHECK(action_byte_code);
     int i = 0;
@@ -1261,14 +1273,14 @@ static void handle_ann_req(void) {
 
 static void handle_deann_req(void) {
   int id = 0;
-  read_from_command_pipe(id);
+  READ_FROM_COMMAND_PIPE(id);
   remove_annotation(id);
   // TODO return command success?
 }
 
 static void handle_activate_annotation() {
   int id = -1;
-  read_from_command_pipe(id);
+  READ_FROM_COMMAND_PIPE(id);
   annotation_t * annotation;
   HASH_FIND_INT(annotations_map, &id, annotation);
   NULL_CHECK(annotation);
@@ -1287,7 +1299,7 @@ static void handle_activate_annotation() {
 
 static void handle_deactivate_annotation() {
   int id = -1;
-  read_from_command_pipe(id);
+  READ_FROM_COMMAND_PIPE(id);
   annotation_t * annotation;
   HASH_FIND_INT(annotations_map, &id, annotation);
   NULL_CHECK(annotation);
@@ -1419,8 +1431,14 @@ static void __afl_start_forkserver(void) {
 
     // Received a command and not a request to fuzz
     if (FD_ISSET(FORKSRV_FD + 2, &rfds)) {
+      int err = 0;
       char cmd[4] = {0};
-      read_from_command_pipe(cmd);
+      READ_FROM_COMMAND_PIPE__BASE(err, cmd, sizeof(cmd));
+      if (err) {
+        char done_msg[4] = "WHAT";
+        WRITE_TO_COMMAND_PIPE(&done_msg, 4);
+        abort();
+      }
       if (strncmp("A_AN", cmd, 4) == 0) {
         handle_activate_annotation();
       } else if (strncmp("D_AN", cmd, 4) == 0) {
@@ -1435,7 +1453,7 @@ static void __afl_start_forkserver(void) {
         FPRINTF_TO_ERR_FILE("fuzzee unknown command: %s\n", cmd);
       }
       char done_msg[4] = "DONE";
-      write_to_command_pipe(&done_msg, 4);
+      WRITE_TO_COMMAND_PIPE(&done_msg, 4);
       continue;
     }
 

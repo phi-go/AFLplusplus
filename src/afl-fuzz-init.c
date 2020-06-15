@@ -2810,10 +2810,10 @@ static void check_forkserver_response(afl_state_t * afl) {
     char done_msg[4] = { 0 };
     read_from_command_pipe(&done_msg, 4);
     if (strncmp("DONE", done_msg, 4) != 0) {
-      FATAL("Did not get DONE msg from forkserver");
+      ABORT("Did not get DONE msg from forkserver");
     }
   } else if (retpoll == 0) {
-      FATAL("Timed out while getting DONE msg from forkserver");
+      ABORT("Timed out while getting DONE msg from forkserver");
   } else {
     PFATAL("Poll for DONE msg from forkserver failed");
   }
