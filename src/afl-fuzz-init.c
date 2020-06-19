@@ -2830,6 +2830,13 @@ static int queue_entry_belongs_to_ann(annotation_t * ann, struct queue_entry * q
   return 0;
 }
 
+static void enable_annotation(afl_state_t * afl, annotation_t * ann) {
+  char cmd[4] = "A_AN";
+  write_to_command_pipe(&cmd, sizeof(cmd));
+  write_to_command_pipe(&ann->id, sizeof(ann->id));
+  check_forkserver_response(afl);
+}
+
 void disable_annotation(afl_state_t * afl, annotation_t * ann) {
     char cmd[4] = "D_AN";
     write_to_command_pipe(&cmd, sizeof(cmd));
@@ -2838,31 +2845,35 @@ void disable_annotation(afl_state_t * afl, annotation_t * ann) {
 }
 
 void adjust_active_annotations(afl_state_t * afl, int set_all_active) {
-  if (get_head(&afl->active_annotations)->next) {
-    LIST_FOREACH_CLEAR(&afl->active_annotations, annotation_t, {
-      disable_annotation(afl, el);
-    });
-  }
   if (get_head(&afl->all_annotations)->next) {
     LIST_FOREACH(&afl->all_annotations, annotation_t, {
+
       if (set_all_active ||
           (!el->initialized && el->type != ANN_EDGE_COV && el->type != ANN_EDGE_MEM_COV) ||
           queue_entry_belongs_to_ann(el, afl->queue_cur)) {
-        list_append(&afl->active_annotations, el);
+
+        if (!get_head(&afl->active_annotations)->next ||
+            !list_contains(&afl->active_annotations, el)) {
+          enable_annotation(afl, el);
+          list_append(&afl->active_annotations, el);
+        }
+
+      } else {
+        if (get_head(&afl->active_annotations)->next &&
+            list_contains(&afl->active_annotations, el)) {
+          disable_annotation(afl, el);
+          list_remove(&afl->active_annotations, el);
+        }
       }
-    });
-  }
-  if (get_head(&afl->active_annotations)->next) {
-    LIST_FOREACH(&afl->active_annotations, annotation_t, {
-      char cmd[4] = "A_AN";
-      write_to_command_pipe(&cmd, sizeof(cmd));
-      write_to_command_pipe(&el->id, sizeof(el->id));
-      check_forkserver_response(afl);
+
     });
   }
 }
 
 void exchange_new_queue_files(afl_state_t * afl) {
+  if (afl->queue_top->id <= afl->ann_exchanged_queue_files) {
+    return;
+  }
   afl->stage_name = "ann exchange";
   adjust_active_annotations(afl, 1);
 

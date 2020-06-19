@@ -463,7 +463,10 @@ FILE * put_err_log_fp = NULL;
 #define READ_FROM_COMMAND_PIPE__BASE(ERR, V, S) \
   { \
     int res; \
-    if (((res = read(FORKSRV_FD + 2, V, S)) != S)) { \
+    while ((res = read(FORKSRV_FD + 2, V, S)) == 0) { \
+      ; \
+    } \
+    if (res != S) { \
       FPRINTF_TO_ERR_FILE("command read failed: %d %s %s:%d\n", \
                           res, strerror(errno), __FILE__, __LINE__); \
       ERR = 1; \
@@ -1334,7 +1337,7 @@ static void handle_deactivate_annotation() {
   HASH_FIND(hh_active, active_annotations_map, &id, sizeof(int), active_ann);
   if (active_ann != NULL) {
     annotation->shm_addr->num_writes_during_run = 0;
-    HASH_DELETE(hh_active, active_annotations_map, annotation);
+    HASH_DELETE(hh_active, active_annotations_map, active_ann);
   }
 
   action_t * act = NULL;
@@ -1511,9 +1514,9 @@ static void __afl_start_forkserver(void) {
 
       {
         annotation_t * ann, * tmp_ann;
-          HASH_ITER(hh_active, active_annotations_map, ann, tmp_ann) {
-            ann->shm_addr->num_writes_during_run = 0;
-          }
+        HASH_ITER(hh_active, active_annotations_map, ann, tmp_ann) {
+          ann->shm_addr->num_writes_during_run = 0;
+        }
       }
 
       child_pid = fork();
