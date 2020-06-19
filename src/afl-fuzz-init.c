@@ -2801,7 +2801,7 @@ static void check_forkserver_response(afl_state_t * afl) {
   fd[0].fd = afl->fsrv.fsrv_cmdr_fd;
   fd[0].events = POLLIN;
   fd[0].revents = 0;
-  int retpoll = poll(fd, 1, 1);
+  int retpoll = poll(fd, 1, 60000);
   if (retpoll > 0 ) {
     if (!(fd[0].revents & POLLIN)) {
       raise(SIGSTOP);
