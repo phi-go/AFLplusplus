@@ -2804,12 +2804,14 @@ static void check_forkserver_response(afl_state_t * afl) {
   int retpoll = poll(fd, 1, 1);
   if (retpoll > 0 ) {
     if (!(fd[0].revents & POLLIN)) {
-      SAYF("Unexpected poll event while waiting for DONE msg from forkserver: %x", fd[0].revents);
+      raise(SIGSTOP);
+      FATAL("Unexpected poll event while waiting for DONE msg from forkserver: %x", fd[0].revents);
       return;
     }
     char done_msg[4] = { 0 };
     read_from_command_pipe(&done_msg, 4);
     if (strncmp("DONE", done_msg, 4) != 0) {
+      raise(SIGSTOP);
       ABORT("Did not get DONE msg from forkserver");
     }
   } else if (retpoll == 0) {

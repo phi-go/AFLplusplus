@@ -471,6 +471,7 @@ FILE * put_err_log_fp = NULL;
     int err = 0; \
     READ_FROM_COMMAND_PIPE__BASE(err, V, S); \
     if (err) { \
+      raise(SIGSTOP); \
       abort(); \
     } \
   } while(0)
@@ -480,6 +481,7 @@ FILE * put_err_log_fp = NULL;
     int err = 0; \
     READ_FROM_COMMAND_PIPE__BASE(err, &V, sizeof(V)); \
     if (err) { \
+      raise(SIGSTOP); \
       abort(); \
     } \
   } while(0)
@@ -487,12 +489,14 @@ FILE * put_err_log_fp = NULL;
 #define WRITE_TO_COMMAND_PIPE(V, S) \
     if ((write(FORKSRV_FD + 3, V, S) != S)) { \
       FPRINTF_TO_ERR_FILE("command write failed %s:%d\n", __FILE__, __LINE__); \
+      raise(SIGSTOP); \
       abort(); \
     }
 
 #define NULL_CHECK(P) \
   if (P == NULL) { \
       FPRINTF_TO_ERR_FILE("ptr should not be null %s:%d\n", __FILE__, __LINE__); \
+      raise(SIGSTOP); \
       _exit(1); \
   }
 
@@ -570,6 +574,7 @@ static annotation_byte_code_t bc_check_valid_top_level(annotation_byte_code_t bc
         || (START_FUNC < bc && bc < END_FUNC)
         || (START_GOAL < bc && bc < END_GOAL))) {
         FPRINTF_TO_ERR_FILE("invalid top level byte code value %d %s\n", bc, bc_str(bc));
+        raise(SIGSTOP);
         _exit(1);
       }
   return bc;
@@ -578,6 +583,7 @@ static annotation_byte_code_t bc_check_valid_top_level(annotation_byte_code_t bc
 static annotation_byte_code_t bc_check_valid(annotation_byte_code_t bc) {
   if (bc >= MAX_BYTE_CODE || bc < 0) {
       FPRINTF_TO_ERR_FILE("invalid byte code value %d\n", bc);
+      raise(SIGSTOP);
       _exit(1);
   }
   return bc;
@@ -626,6 +632,7 @@ static void set_breakpoint(action_t * action, int quiet) {
   if (!(*action->pos == 0xCC || *action->pos == (uint8_t)action->instruction_bytes[0])) {
       FPRINTF_TO_ERR_FILE("set bp pos (%p) is not 0xCC or expected initial 0x%x but 0x%x\n",
       action->pos, (uint8_t)action->instruction_bytes[0], *action->pos);
+      raise(SIGSTOP);
       _exit(1);
   }
   if (!quiet) {
@@ -652,6 +659,7 @@ static void remove_breakpoint(action_t * action, int quiet) {
   if (!(*action->pos == 0xcc || *action->pos == (uint8_t)action->instruction_bytes[0])) {
       FPRINTF_TO_ERR_FILE("remove bp pos (%lx) is not 0xcc or expected initial 0x%x but 0x%x\n",
       action->pos, (uint8_t)action->instruction_bytes[0], *action->pos);
+      raise(SIGSTOP);
       _exit(1);
   }
   if (!quiet) {
@@ -727,6 +735,7 @@ static void remove_breakpoint(action_t * action, int quiet) {
 #define BC_PUSH(V) \
   if (stack_ptr >= stack + 64) { \
       FPRINTF_TO_ERR_FILE("bc stack overflow %s:%d\n", __FILE__, __LINE__); \
+      raise(SIGSTOP); \
       _exit(1); \
   } \
   *stack_ptr = V; \
@@ -736,6 +745,7 @@ static void remove_breakpoint(action_t * action, int quiet) {
   stack_ptr -= 1; \
   if (stack_ptr < stack) { \
     FPRINTF_TO_ERR_FILE("bc stack underflow %s:%d\n", __FILE__, __LINE__); \
+    raise(SIGSTOP); \
     _exit(1); \
   } \
   V = *stack_ptr;
@@ -743,6 +753,7 @@ static void remove_breakpoint(action_t * action, int quiet) {
 #define BC_PEEK(V) \
   if (stack_ptr-1 < stack) { \
     FPRINTF_TO_ERR_FILE("bc stack underflow %s:%d\n", __FILE__, __LINE__); \
+    raise(SIGSTOP); \
     _exit(1); \
   } \
   V = *(stack_ptr-1);
@@ -765,6 +776,7 @@ static uint64_t bc_get_reg(annotation_byte_code_t reg, ucontext_t * ctx, int all
         return 0;
       }
       FPRINTF_TO_ERR_FILE("no_reg is not allowed: %s(%d) ", bc_str(reg), reg);
+      raise(SIGSTOP);
       _exit(1);
     // I'm sorry ... (using macros should hopefully reduce the chance for typos)
     CLASSIC_REGISTER_CASES(A);
@@ -792,6 +804,7 @@ static uint64_t bc_get_reg(annotation_byte_code_t reg, ucontext_t * ctx, int all
       return (ctx->uc_mcontext.gregs[REG_CSGSFS] >> 32) & 0xFFFF;
     default:
       FPRINTF_TO_ERR_FILE("ERROR unhandled reg: %s(%d)\n", bc_str(reg), reg);
+      raise(SIGSTOP);
       _exit(1);
   }
 }
@@ -815,6 +828,7 @@ static uint64_t bc_get_ptr(annotation_byte_code_t segment_reg,
     addr = segment + base + index*scale + (int32_t)displacement;
   } else {
     FPRINTF_TO_ERR_FILE("ERROR invalid disp type %d", disp_type);
+    raise(SIGSTOP);
     _exit(1);
   }
   if (verbose) { FPRINTF_TO_ERR_FILE("addr: %p + %p + %d*%d + %d = %p size:(%d)\n",
@@ -837,6 +851,7 @@ static bool is_pointer_valid(uint64_t p, int verbose) {
         return 0;
       } else {
         FPRINTF_TO_ERR_FILE("ERROR during msync of %p: %s\n", p, strerror(errno));
+        raise(SIGSTOP);
         _exit(1);
       }
     }
@@ -1072,6 +1087,7 @@ static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
       remove_breakpoint(act, /*quiet*/ 1);
     } else {
       FPRINTF_TO_ERR_FILE("ERROR no actions for %p found (before stepping)\n", pos);
+      raise(SIGSTOP);
       _exit(1);
     }
     return;
@@ -1157,6 +1173,7 @@ static void remove_annotation(int annotation_id) {
   HASH_FIND_INT(annotations_map, &annotation_id, annotation);
   if (annotation == NULL) {
       FPRINTF_TO_ERR_FILE("expected annotation for %d to exist\n", annotation_id);
+      raise(SIGSTOP);
       _exit(1);
   }
 
@@ -1210,6 +1227,7 @@ static void handle_ann_req(void) {
   ann->shm_addr = shmat(ann->shm_id, NULL, 0);
   if (ann->shm_addr == (void *) -1) {
     perror("could not get shm segment");
+    raise(SIGSTOP);
     _exit(1);
   }
   HASH_ADD_INT(annotations_map, id, ann);
@@ -1437,6 +1455,7 @@ static void __afl_start_forkserver(void) {
       if (err) {
         char done_msg[4] = "WHAT";
         WRITE_TO_COMMAND_PIPE(&done_msg, 4);
+        raise(SIGSTOP);
         abort();
       }
       if (strncmp("A_AN", cmd, 4) == 0) {
