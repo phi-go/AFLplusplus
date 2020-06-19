@@ -461,12 +461,14 @@ FILE * put_err_log_fp = NULL;
   } while(0)
 
 #define READ_FROM_COMMAND_PIPE__BASE(ERR, V, S) \
+  { \
     int res; \
     if (((res = read(FORKSRV_FD + 2, V, S)) != S)) { \
       FPRINTF_TO_ERR_FILE("command read failed: %d %s %s:%d\n", \
                           res, strerror(errno), __FILE__, __LINE__); \
       ERR = 1; \
-    }
+    } \
+  }
 
 #define READ_FROM_COMMAND_PIPE2(V, S) \
   do { \
@@ -489,13 +491,15 @@ FILE * put_err_log_fp = NULL;
   } while(0)
 
 #define WRITE_TO_COMMAND_PIPE(V, S) \
+  { \
     int res; \
     if (((res = write(FORKSRV_FD + 3, V, S)) != S)) { \
       FPRINTF_TO_ERR_FILE("command write failed %d %s %s:%d\n", \
                           res, strerror(errno), __FILE__, __LINE__); \
       raise(SIGSTOP); \
       abort(); \
-    }
+    } \
+  }
 
 #define NULL_CHECK(P) \
   if (P == NULL) { \
