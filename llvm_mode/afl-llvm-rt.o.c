@@ -53,6 +53,8 @@
 #include <uthash.h>
 #include <utlist.h>
 
+#include <execinfo.h>
+
 #ifdef __linux__
 #include "snapshot-inl.h"
 #endif
@@ -1147,6 +1149,24 @@ static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
   }
 }
 
+void backtrace_handler(int sig, siginfo_t *si, void* arg) {
+  void *array[256];
+  size_t size;
+
+  // get void*'s for all entries on the stack
+  size = backtrace(array, 256);
+
+  // print out all the frames to stderr
+  FPRINTF_TO_ERR_FILE("Error: signal %d:\n", sig);
+
+  if (put_err_log_fp != NULL) {
+    backtrace_symbols_fd(array, size, fileno(put_err_log_fp));
+  } else {
+    backtrace_symbols_fd(array, size, STDERR_FILENO);
+  }
+  return;
+}
+
 static void print_annotations() {
   annotation_t * an;
   action_t * ac;
@@ -1382,10 +1402,12 @@ static void __afl_start_forkserver(void) {
      assume we're not running in forkserver mode and just execute program. */
 
   if (write(FORKSRV_FD + 1, tmp, 4) != 4) return;
-  struct sigaction action;
-  action.sa_sigaction = &sigtrap_handler;
-  action.sa_flags = SA_SIGINFO;
-  sigaction(SIGTRAP, &action, NULL);
+  {
+    struct sigaction action;
+    action.sa_sigaction = &sigtrap_handler;
+    action.sa_flags = SA_SIGINFO;
+    sigaction(SIGTRAP, &action, NULL);
+  }
 
   char * put_log_path = getenv("IJON_PUT_LOG_PATH");
   if (put_log_path == NULL) {
@@ -1397,6 +1419,20 @@ static void __afl_start_forkserver(void) {
     }
   }
   FPRINTF_TO_ERR_FILE("PUT starting up\n");
+
+  {
+    struct sigaction action;
+    action.sa_sigaction = &backtrace_handler;
+    action.sa_flags = SA_SIGINFO | SA_RESETHAND;
+    sigaction(SIGSEGV, &action, NULL);
+    sigaction(SIGILL, &action, NULL);
+    sigaction(SIGFPE, &action, NULL);
+    sigaction(SIGBUS, &action, NULL);
+    sigaction(SIGABRT, &action, NULL);
+  }
+
+  int *foo = (int*)-1; // make a bad pointer
+  printf("%d\n", *foo);
 
   if (__afl_dictionary_len > 0 && __afl_dictionary) {
 
