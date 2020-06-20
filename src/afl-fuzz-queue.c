@@ -299,7 +299,6 @@ void remove_from_queue(afl_state_t *afl, struct queue_entry * q) {
 
   for (int i = 0; i < afl->fsrv.map_size; ++i) {
     if (afl->top_rated[i] == q) {
-      SAYF("q is top rated");
       afl->top_rated[i] = NULL;
     }
   }
