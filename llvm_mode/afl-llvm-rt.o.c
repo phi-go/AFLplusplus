@@ -1431,9 +1431,6 @@ static void __afl_start_forkserver(void) {
     sigaction(SIGABRT, &action, NULL);
   }
 
-  int *foo = (int*)-1; // make a bad pointer
-  printf("%d\n", *foo);
-
   if (__afl_dictionary_len > 0 && __afl_dictionary) {
 
     if (read(FORKSRV_FD, &was_killed, 4) != 4) _exit(1);
