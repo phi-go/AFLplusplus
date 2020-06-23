@@ -1195,7 +1195,26 @@ static void print_annotations() {
 static void handle_bb_req() {
   struct BBReq req;
   READ_FROM_COMMAND_PIPE(req);
+
+  annotation_t * ann = NULL, * tmp_ann = NULL;
+  action_t * act = NULL;
+  HASH_ITER(hh_active, active_annotations_map, ann, tmp_ann) {
+    LL_FOREACH2(ann->actions, act, annotation_next) {
+      // TODO remove message
+      if ((uint64_t)req.pos <= (uint64_t)act->pos && (uint64_t)act->pos < (uint64_t)req.pos+req.size) {
+        FPRINTF_TO_ERR_FILE("would have gotten the wrong value %x in %x %d\n", act->pos, req.pos, req.size);
+      }
+      remove_breakpoint(act, /*quiet*/ 1);
+    }
+  }
+
   WRITE_TO_COMMAND_PIPE(req.pos, req.size);
+
+  HASH_ITER(hh_active, active_annotations_map, ann, tmp_ann) {
+    LL_FOREACH2(ann->actions, act, annotation_next) {
+      set_breakpoint(act, /*quiet*/ 1);
+    }
+  }
 }
 
 static void remove_annotation(int annotation_id) {
@@ -1593,15 +1612,15 @@ static void __afl_start_forkserver(void) {
     if (WIFSTOPPED(status)) child_stopped = 1;
 
     if (WIFSIGNALED(status)) {
-      FPRINTF_TO_ERR_FILE("PUT signaled: %d, core: %d", WTERMSIG(status), WCOREDUMP(status));
+      FPRINTF_TO_ERR_FILE("PUT signaled: %d, core: %d\n", WTERMSIG(status), WCOREDUMP(status));
     }
 
     if (WIFSTOPPED(status)) {
-      FPRINTF_TO_ERR_FILE("PUT stopped: %d", WSTOPSIG(status));
+      FPRINTF_TO_ERR_FILE("PUT stopped: %d\n", WSTOPSIG(status));
     }
 
     if (WIFCONTINUED(status)) {
-      FPRINTF_TO_ERR_FILE("PUT continued: %d");
+      FPRINTF_TO_ERR_FILE("PUT continued: %d\n");
     }
 
     /* Relay wait status to pipe, then loop back. */
