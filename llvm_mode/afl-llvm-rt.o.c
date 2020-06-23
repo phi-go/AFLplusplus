@@ -1592,6 +1592,18 @@ static void __afl_start_forkserver(void) {
 
     if (WIFSTOPPED(status)) child_stopped = 1;
 
+    if (WIFSIGNALED(status)) {
+      FPRINTF_TO_ERR_FILE("PUT signaled: %d, core: %d", WTERMSIG(status), WCOREDUMP(status));
+    }
+
+    if (WIFSTOPPED(status)) {
+      FPRINTF_TO_ERR_FILE("PUT stopped: %d", WSTOPSIG(status));
+    }
+
+    if (WIFCONTINUED(status)) {
+      FPRINTF_TO_ERR_FILE("PUT continued: %d");
+    }
+
     /* Relay wait status to pipe, then loop back. */
 
     if (write(FORKSRV_FD + 1, &status, 4) != 4) _exit(1);
