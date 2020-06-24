@@ -2361,12 +2361,12 @@ retry_splicing:
     afl->splicing_with = tid;
     target = afl->queue;
 
-    while (tid >= 100) {
+    // while (tid >= 100) {
 
-      target = target->next_100;
-      tid -= 100;
+    //   target = target->next_100;
+    //   tid -= 100;
 
-    }
+    // }
 
     while (tid--) {
 
@@ -4342,12 +4342,12 @@ pacemaker_fuzzing:
         afl->splicing_with = tid;
         target = afl->queue;
 
-        while (tid >= 100) {
+        // while (tid >= 100) {
 
-          target = target->next_100;
-          tid -= 100;
+        //   target = target->next_100;
+        //   tid -= 100;
 
-        }
+        // }
 
         while (tid--) {
 

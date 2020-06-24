@@ -191,27 +191,27 @@ struct queue_entry * add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passe
 
   afl->cycles_wo_finds = 0;
 
-  int q_pos = 0;
-  {
-    struct queue_entry *n = afl->queue, *last_100 = NULL;
-    int found = 0, cnt = 0;
-    while (n) {
+  // int q_pos = 0;
+  // {
+  //   struct queue_entry *n = afl->queue, *last_100 = NULL;
+  //   int found = 0, cnt = 0;
+  //   while (n) {
       
-      if (cnt % 100) {
-        n->next_100 = NULL;
-      } else {
-        if (last_100) {
-          last_100->next_100 = n;
-        }
-        last_100 = n;
-      }
+  //     if (cnt % 100) {
+  //       n->next_100 = NULL;
+  //     } else {
+  //       if (last_100) {
+  //         last_100->next_100 = n;
+  //       }
+  //       last_100 = n;
+  //     }
 
-      if (n == q) { found = 1; }
-      if (!found) { q_pos++; }
-      cnt++;
-      n = n->next;
-    }
-  }
+  //     if (n == q) { found = 1; }
+  //     if (!found) { q_pos++; }
+  //     cnt++;
+  //     n = n->next;
+  //   }
+  // }
 
   afl->last_path_time = get_cur_time();
 
