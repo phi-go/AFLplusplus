@@ -2515,8 +2515,27 @@ abandon_entry:
     ++afl->totals_fuzz_level[calculate_fuzz_bucket(afl->queue_cur->fuzz_level)];
   }
 
+  int new_execs = afl->fsrv.total_execs - num_exec_start;
+
+  {
+    /* Update path frequency. */
+    struct queue_entry *q = afl->queue;
+    while (q) {
+
+      if (q->exec_cksum == afl->queue_cur->exec_cksum) {
+
+        q->n_fuzz = q->n_fuzz + 1;
+        break;
+
+      }
+
+      q = q->next;
+
+    }
+  }
+
   munmap(orig_in, afl->queue_cur->len);
-  zmq_send_exec_update(afl, afl->queue_cur, afl->fsrv.total_execs - num_exec_start);
+  zmq_send_exec_update(afl, afl->queue_cur, new_execs);
   return ret_val;
 
 #undef FLIP_BIT
