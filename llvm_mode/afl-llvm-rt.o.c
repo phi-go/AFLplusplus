@@ -1164,6 +1164,19 @@ void backtrace_handler(int sig, siginfo_t *si, void* arg) {
   } else {
     backtrace_symbols_fd(array, size, STDERR_FILENO);
   }
+
+  ucontext_t *ctx = (ucontext_t *)arg;
+  uint8_t * pos = (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP] - 16;
+
+  FPRINTF_TO_ERR_FILE("\ncode around %p: ", pos+16);
+  int i;
+  for (i = 0; i < 32; i++)
+  {
+      if (i > 0) FPRINTF_TO_ERR_FILE(":");
+      FPRINTF_TO_ERR_FILE("%02X", pos[i]);
+  }
+  FPRINTF_TO_ERR_FILE("\n");
+
   return;
 }
 
@@ -1201,7 +1214,7 @@ static void handle_bb_req() {
   HASH_ITER(hh_active, active_annotations_map, ann, tmp_ann) {
     LL_FOREACH2(ann->actions, act, annotation_next) {
       // TODO remove message
-      if ((uint64_t)req.pos <= (uint64_t)act->pos && (uint64_t)act->pos < (uint64_t)req.pos+req.size) {
+      if ((uint64_t)req.pos <= (uint64_t)act->pos && (uint64_t)act->pos < ((uint64_t)req.pos+req.size)) {
         FPRINTF_TO_ERR_FILE("would have gotten the wrong value %x in %x %d\n", act->pos, req.pos, req.size);
       }
       remove_breakpoint(act, /*quiet*/ 1);
