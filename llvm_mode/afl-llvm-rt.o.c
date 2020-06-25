@@ -640,6 +640,7 @@ static annotation_t * active_annotations_map = NULL;
 static pos_actions_t * pos_actions_map = NULL;
 
 static __thread uint8_t * single_step_start_pos = NULL;
+static __thread uint8_t should_restore_bp = 1;
 static __thread action_t * edge_cov_action = NULL;
 static __thread uint64_t edge_cov_target = 0;
 
@@ -1029,6 +1030,7 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
           BC_PEEK(res);
           shm->result.best_values[shm->num_writes_during_run] = res;
           shm->num_writes_during_run++;
+          should_restore_bp |= 1;
         }
         break;
       case GOAL_SET:
@@ -1039,6 +1041,7 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
           uint64_t x;
           BC_PEEK(x);
           set_bit_in_hashmap(x, shm, verbose);
+          should_restore_bp |= 1;
         }
         break;
       case GOAL_EDGE_COV:
@@ -1047,12 +1050,14 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
           BC_PEEK(target);
           edge_cov_target = target;
           edge_cov_action = action;
+          should_restore_bp |= 0;
         }
         break;
       case GOAL_EDGE_MEM_COV:
         {
           edge_cov_target = 0;  // In band signal for unknown targets, new ones are important.
           edge_cov_action = action;
+          should_restore_bp |= 1;
         }
         break;
       default:
@@ -1072,6 +1077,8 @@ static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
     // and instructions are completed before we get to the signal handler
     // so subtract one from our position
     uint8_t * pos = (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP] - 1;
+
+    should_restore_bp = 0;
 
     pos_actions_t * actions;
     HASH_FIND_PTR(pos_actions_map, &pos, actions);
@@ -1114,7 +1121,9 @@ static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
     //   FPRINTF_TO_ERR_FILE("no actions for %p found (after stepping %d - real pos %p)\n",
     //           pos, single_step_size, (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP]);
     // }
-    set_breakpoint_at_addr(single_step_start_pos);
+    if (should_restore_bp) {
+      set_breakpoint_at_addr(single_step_start_pos);
+    }
 
     // unset trap flag
     ctx->uc_mcontext.gregs[REG_EFL] &= ~0x100;
