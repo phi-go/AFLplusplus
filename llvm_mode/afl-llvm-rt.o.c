@@ -1171,6 +1171,9 @@ void backtrace_handler(int sig, siginfo_t *si, void* arg) {
   }
   FPRINTF_TO_ERR_FILE("\n");
 
+  char done_msg[4] = "WHAT";
+  WRITE_TO_COMMAND_PIPE(&done_msg, 4);
+  raise(SIGSTOP);
   return;
 }
 
