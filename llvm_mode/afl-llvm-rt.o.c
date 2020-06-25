@@ -607,15 +607,17 @@ static annotation_byte_code_t bc_check_valid(annotation_byte_code_t bc) {
 
 #define MAX_INSTRUCTION_SIZE 16
 
+typedef struct annotation annotation_t;
+
 typedef struct action {
   uint8_t * pos;
   uint8_t instruction_size;
   char instruction_bytes[MAX_INSTRUCTION_SIZE];
   int byte_code_len;
   annotation_byte_code_t * byte_code;
-  int annotation_id;
   struct action * annotation_next;
   struct action * pos_next;
+  annotation_t * annotation;
 } action_t;
 
 typedef struct annotation {
@@ -1017,9 +1019,7 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
       case GOAL_MAX: // comparison is done in fuzzer code
         {
           // TODO this is not thread safe
-          annotation_t * annotation;
-          HASH_FIND_INT(annotations_map, &action->annotation_id, annotation);
-          NULL_CHECK(annotation);
+          annotation_t * annotation = action->annotation;
           NULL_CHECK(annotation->shm_addr);
           shm_content_t * shm = annotation->shm_addr;
           uint64_t res;
@@ -1033,9 +1033,7 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
         break;
       case GOAL_SET:
         {
-          annotation_t * annotation;
-          HASH_FIND_INT(annotations_map, &action->annotation_id, annotation);
-          NULL_CHECK(annotation);
+          annotation_t * annotation = action->annotation;
           NULL_CHECK(annotation->shm_addr);
           shm_content_t * shm = annotation->shm_addr;
           uint64_t x;
@@ -1126,17 +1124,13 @@ static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
     if (edge_cov_action != NULL) {
       uint8_t * pos = (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP];
       if (edge_cov_target == 0) {
-        annotation_t * annotation;
-        HASH_FIND_INT(annotations_map, &edge_cov_action->annotation_id, annotation);
-        NULL_CHECK(annotation);
+        annotation_t * annotation = edge_cov_action->annotation;
         NULL_CHECK(annotation->shm_addr);
         shm_content_t * shm = annotation->shm_addr;
         set_bit_in_hashmap((uint64_t)pos, shm, 0);
       } else {
         if ((uint64_t)pos == edge_cov_target) {
-          annotation_t * annotation;
-          HASH_FIND_INT(annotations_map, &edge_cov_action->annotation_id, annotation);
-          NULL_CHECK(annotation);
+          annotation_t * annotation = edge_cov_action->annotation;
           NULL_CHECK(annotation->shm_addr);
           shm_content_t * shm = annotation->shm_addr;
           shm->num_writes_during_run = 1;
@@ -1324,7 +1318,7 @@ static void handle_ann_req(void) {
       READ_FROM_COMMAND_PIPE2(&(action_byte_code[i++]), sizeof(*action_byte_code));
     }
     action->byte_code = action_byte_code;
-    action->annotation_id = ann->id;
+    action->annotation = ann;
     action->annotation_next = NULL;
     action->pos_next = NULL;
 
