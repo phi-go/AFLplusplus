@@ -863,7 +863,9 @@ void show_stats(afl_state_t *afl) {
 
 #define PRINT_ANNOTATION() \
   switch (el->type) { \
-    case(ANN_MIN): { \
+    case ANN_MIN_SINGLE: \
+    case ANN_MIN_ITER: \
+    { \
       int length = 0; \
       SAYF("\n" bV bSTOP cRST); \
       length += sprintf(tmp+length, "id: %4d min(%d) %4d: ", \
@@ -875,7 +877,9 @@ void show_stats(afl_state_t *afl) {
       SAYF(" %-74.74s ", tmp); \
       SAYF(SET_G1 bSTG bV); \
     } break; \
-    case(ANN_MAX): { \
+    case ANN_MAX_SINGLE: \
+    case ANN_MAX_ITER: \
+    { \
       int length = 0; \
       SAYF("\n" bV bSTOP cRST); \
       length += sprintf(tmp+length, "id: %4d max(%d) %4d: ", \

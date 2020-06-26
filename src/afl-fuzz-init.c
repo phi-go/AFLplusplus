@@ -2570,10 +2570,12 @@ static void __zmq_annotation_req(afl_state_t * afl) {
   ann->times_improved = 0;
   ann->max_pos = -1;
   switch (ann->type) {
-    case ANN_MIN:
+    case ANN_MIN_SINGLE:
+    case ANN_MIN_ITER:
       memset(ann->cur_best.best_values, '\xFF', sizeof(ann->cur_best.best_values));
       break;
-    case ANN_MAX:
+    case ANN_MAX_SINGLE:
+    case ANN_MAX_ITER:
       memset(ann->cur_best.best_values, 0, sizeof(ann->cur_best.best_values));
       break;
     case ANN_SET:
@@ -2646,21 +2648,31 @@ void remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann) {
 
 static void leave_best_min_max_annotation_queue_files(afl_state_t * afl, annotation_t * ann) {
   if (!ann->new_ann_queue_files) { return; }
-  if (ann->type != ANN_MIN && ann->type != ANN_MAX ) { FATAL("this function is only for ann max and min"); }
+  if (ann->type != ANN_MIN_SINGLE && ann->type != ANN_MAX_SINGLE
+      && ann->type != ANN_MIN_ITER && ann->type != ANN_MAX_ITER) {
+    FATAL("this function is only for ann max and min");
+  }
+  int until = 1;
+  if (ann->type == ANN_MIN_ITER || ann->type == ANN_MAX_ITER) {
+    until = SIZEOF_FIELD(struct queue_entry, ann_best_for_pos);
+    SAYF("until %d\n", until);
+  }
   if (get_head(&ann->corresponding_queue_files)->next) {
     LIST_FOREACH(&ann->corresponding_queue_files, struct queue_entry, {
       int remove = 1;
-      for (int i = 0; i < sizeof(el->ann_best_for_pos); i++) {
+      for (int i = 0; i < until; i++) {
         if (el->ann_best_for_pos[i]) {
 
           switch(ann->type) {
-            case ANN_MIN:
+            case ANN_MIN_SINGLE:
+            case ANN_MIN_ITER:
               if (ann->cur_best.best_values[i] == 0) {
                 // best possible so no longer interesting
                 continue;
               }
               break;
-            case ANN_MAX:
+            case ANN_MAX_SINGLE:
+            case ANN_MAX_ITER:
               if (ann->cur_best.best_values[i] == UINT64_MAX) {
                 // best possible so no longer interesting
                 continue;
@@ -2742,8 +2754,10 @@ void clean_up_annotation_queue_files(afl_state_t * afl) {
   if (get_head(&afl->all_annotations)->next) {
     LIST_FOREACH(&afl->all_annotations, annotation_t, {
       switch(el->type) {
-        case ANN_MIN:
-        case ANN_MAX:
+        case ANN_MIN_SINGLE:
+        case ANN_MAX_SINGLE:
+        case ANN_MIN_ITER:
+        case ANN_MAX_ITER:
           // qe->ann_pos is not needed for these annotations types so ignore
           leave_best_min_max_annotation_queue_files(afl, el);
           break;
@@ -2755,8 +2769,7 @@ void clean_up_annotation_queue_files(afl_state_t * afl) {
           // has no own queue files so do nothing
           break;
         default:
-          FATAL("Unknown annotation type %d, known MIN(%d), MAX(%d), SET(%d)",
-                el->type, ANN_MIN, ANN_MAX, ANN_SET);
+          FATAL("Unknown annotation type %d", el->type);
       }
     });
   }

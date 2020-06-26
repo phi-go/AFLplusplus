@@ -569,7 +569,41 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
         uint64_t num_writes = el->shm_addr->num_writes_during_run;
         if (num_writes) {
           switch(el->type) {
-            case ANN_MIN:
+            case ANN_MIN_SINGLE:
+              {
+                if (num_writes > 0) {
+                  uint64_t contender = el->shm_addr->result.best_values[0];
+                  if (contender < el->cur_best.best_values[0]) {
+                    if (el->cur_best.best_values[0] == UINT64_MAX) {
+                      candidate = 1;
+                    }
+                    el->cur_best.best_values[0] = contender;
+                    el->max_pos = 0;
+                    improvement += 1;
+                    ann_best_for_pos[0] = 1;
+                    zmq_send_annotation_update(afl, el->id, 0, contender);
+                  }
+                }
+              }
+              break;
+            case ANN_MAX_SINGLE:
+              {
+                if (num_writes > 0) {
+                  uint64_t contender = el->shm_addr->result.best_values[0];
+                  if (contender > el->cur_best.best_values[0]) {
+                    if (el->cur_best.best_values[0] == 0) {
+                      candidate = 1;
+                    }
+                    el->cur_best.best_values[0] = contender;
+                    el->max_pos = 0;
+                    improvement += 1;
+                    ann_best_for_pos[0] = 1;
+                    zmq_send_annotation_update(afl, el->id, 0, contender);
+                  }
+                }
+              }
+              break;
+            case ANN_MIN_ITER:
               {
                 for (int i = 0; i < num_writes; i++) {
                   uint64_t contender = el->shm_addr->result.best_values[i];
@@ -586,7 +620,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
                 }
               }
               break;
-            case ANN_MAX:
+            case ANN_MAX_ITER:
               {
                 for (int i = 0; i < num_writes; i++) {
                   uint64_t contender = el->shm_addr->result.best_values[i];

@@ -115,12 +115,21 @@
 
 #define STAGE_BUF_SIZE (64)  /* usable size for stage name buf in afl_state */
 
+/**
+ * sizeof_field(TYPE, MEMBER)
+ *
+ * @TYPE: The structure containing the field of interest
+ * @MEMBER: The field to return the size of
+ */
+#define SIZEOF_FIELD(TYPE, MEMBER) sizeof((((TYPE *)0)->MEMBER))
+
 extern s8  interesting_8[INTERESTING_8_LEN];
 extern s16 interesting_16[INTERESTING_8_LEN + INTERESTING_16_LEN];
 extern s32
     interesting_32[INTERESTING_8_LEN + INTERESTING_16_LEN + INTERESTING_32_LEN];
 
-typedef enum {ANN_MIN, ANN_SET, ANN_MAX, ANN_EDGE_COV, ANN_EDGE_MEM_COV} annotation_type_t;
+typedef enum {ANN_MIN_SINGLE, ANN_SET, ANN_MAX_SINGLE, ANN_MIN_ITER, ANN_MAX_ITER,
+              ANN_EDGE_COV, ANN_EDGE_MEM_COV} annotation_type_t;
 #define NUM_FUZZ_BUCKETS 16
 
 struct queue_entry;

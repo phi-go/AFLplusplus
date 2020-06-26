@@ -562,7 +562,8 @@ struct BBReq {
   X(END_FUNC) \
   \
   X(START_GOAL) \
-  X(GOAL_MIN) X(GOAL_SET) X(GOAL_MAX) X(GOAL_EDGE_COV) X(GOAL_EDGE_MEM_COV) \
+  X(GOAL_MIN_SINGLE) X(GOAL_SET) X(GOAL_MAX_SINGLE) X(GOAL_MIN_ITER) X(GOAL_MAX_ITER) X(GOAL_EDGE_COV) \
+  X(GOAL_EDGE_MEM_COV) \
   X(END_GOAL) \
   \
   X(MAX_BYTE_CODE)
@@ -1016,8 +1017,46 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
           BC_PUSH(total);
         }
         break;
-      case GOAL_MIN:
-      case GOAL_MAX: // comparison is done in fuzzer code
+      case GOAL_MIN_SINGLE:
+        {
+          // TODO this is not thread safe
+          annotation_t * annotation = action->annotation;
+          NULL_CHECK(annotation->shm_addr);
+          shm_content_t * shm = annotation->shm_addr;
+          uint64_t res;
+          BC_PEEK(res);
+          if (shm->num_writes_during_run == 0) {
+              shm->result.best_values[0] = res;
+          } else {
+            if (res < shm->result.best_values[0]) {
+              shm->result.best_values[0] = res;
+            }
+          }
+          shm->num_writes_during_run++;
+          should_restore_bp |= 1;
+        }
+        break;
+      case GOAL_MAX_SINGLE:
+        {
+          // TODO this is not thread safe
+          annotation_t * annotation = action->annotation;
+          NULL_CHECK(annotation->shm_addr);
+          shm_content_t * shm = annotation->shm_addr;
+          uint64_t res;
+          BC_PEEK(res);
+          if (shm->num_writes_during_run == 0) {
+              shm->result.best_values[0] = res;
+          } else {
+            if (res > shm->result.best_values[0]) {
+              shm->result.best_values[0] = res;
+            }
+          }
+          shm->num_writes_during_run++;
+          should_restore_bp |= 1;
+        }
+        break;
+      case GOAL_MIN_ITER:
+      case GOAL_MAX_ITER: // comparison is done in fuzzer code
         {
           // TODO this is not thread safe
           annotation_t * annotation = action->annotation;
