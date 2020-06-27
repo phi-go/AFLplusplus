@@ -558,7 +558,7 @@ struct BBReq {
   X(END_REG) \
   \
   X(START_FUNC) \
-  X(CALC_ABS) X(CALC_SUB) X(CALC_HAMMING) X(CALC_HAMMING_FOR) \
+  X(CALC_ABS) X(CALC_SUB) X(CALC_AND) X(CALC_HAMMING) X(CALC_HAMMING_FOR) \
   X(END_FUNC) \
   \
   X(START_GOAL) \
@@ -973,6 +973,14 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
           uint64_t size = byte_code[i++];
           BC_PUSH(bc_get_ptr(segment_reg, base_reg, index_reg, scale, disp_type, displacement, size,
                              ctx, verbose));
+        }
+        break;
+      case CALC_AND:
+        {
+          uint64_t a, b;
+          BC_POP(a);
+          BC_POP(b);
+          BC_PUSH(a & b);
         }
         break;
       case CALC_SUB:
