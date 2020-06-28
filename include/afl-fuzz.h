@@ -141,6 +141,7 @@ typedef struct annotation {
   shm_content_t * shm_addr;
   int initialized;
   int times_improved;
+  int total_times_improved;
   annotation_result_t cur_best;
   int max_pos;
   list_t corresponding_queue_files;
@@ -989,7 +990,7 @@ void   zmq_send_annotation_update(afl_state_t *, int ann_id, u64 pos, u64 new_be
 void   zmq_handle_commands(afl_state_t *);
 void   remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann);
 void   clean_up_annotation_queue_files(afl_state_t * afl);
-int    calculate_fuzz_bucket(int fuzz_level);
+int    calculate_fuzz_bucket(struct queue_entry * qe);
 int    skip_queue_file(afl_state_t * afl, struct queue_entry * qe);
 void   disable_annotation(afl_state_t * afl, annotation_t * ann);
 void   adjust_active_annotations(afl_state_t * afl, int);

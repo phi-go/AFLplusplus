@@ -691,7 +691,8 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
         }
         if (improvement) {
           ia = 1;
-          el->times_improved += improvement;
+          el->times_improved += 1;
+          el->total_times_improved += improvement;
 
           queue_fn = alloc_printf("%s/queue/id:%06u,%s,ann:%d,impr:%d", afl->out_dir,
                                   afl->total_queued_paths, describe_op(afl, 0, -1),

@@ -2507,13 +2507,9 @@ abandon_entry:
 
   }
 
-  if (!afl->queue_cur->ann_candidate) {
-    --afl->totals_fuzz_level[calculate_fuzz_bucket(afl->queue_cur->fuzz_level)];
-  }
+  --afl->totals_fuzz_level[calculate_fuzz_bucket(afl->queue_cur)];
   ++afl->queue_cur->fuzz_level;
-  if (!afl->queue_cur->ann_candidate) {
-    ++afl->totals_fuzz_level[calculate_fuzz_bucket(afl->queue_cur->fuzz_level)];
-  }
+  ++afl->totals_fuzz_level[calculate_fuzz_bucket(afl->queue_cur)];
 
   int new_execs = afl->fsrv.total_execs - num_exec_start;
 
