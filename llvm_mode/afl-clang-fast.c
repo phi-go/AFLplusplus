@@ -437,8 +437,15 @@ static void edit_params(u32 argc, char **argv, char **envp) {
     cc_params[cc_par_cnt++] = "-O3";
     cc_params[cc_par_cnt++] = "-mno-avx";
     cc_params[cc_par_cnt++] = "-mno-avx2";
+    // cc_params[cc_par_cnt++] = "-mno-sse";
+    // cc_params[cc_par_cnt++] = "-mno-sse2";
+    cc_params[cc_par_cnt++] = "-mno-sse3";
+    cc_params[cc_par_cnt++] = "-mno-sse4.1";
+    cc_params[cc_par_cnt++] = "-mno-sse4.2";
+    cc_params[cc_par_cnt++] = "-mno-sse4a";
     cc_params[cc_par_cnt++] = "-mno-movbe";
     cc_params[cc_par_cnt++] = "-mno-bmi";
+    cc_params[cc_par_cnt++] = "-mno-bmi2";
     cc_params[cc_par_cnt++] = "-funroll-loops";
     if (strlen(march_opt) > 1 && march_opt[0] == '-')
       cc_params[cc_par_cnt++] = march_opt;
