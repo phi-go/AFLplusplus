@@ -2757,7 +2757,8 @@ static void leave_best_min_max_annotation_queue_files(afl_state_t * afl, annotat
 #define FB_ONE_IN_TWENTY 4
 #define FB_UNINIT 5
 
-#define PRIORITY_FB FB_BASE
+#define PRIORITY_FB_START FB_MIN_SINGLE
+#define PRIORITY_FB_END FB_BASE
 
 static int update_totals(afl_state_t * afl, struct queue_entry * qe, int fuzz_bucket) {
   if (qe->fuzz_bucket != fuzz_bucket) {
@@ -2779,6 +2780,10 @@ void remove_qe_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) {
 }
 
 int calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) {
+  if (qe->ann != NULL && qe->ann->type == ANN_META_NODE) {
+    return update_totals(afl, qe, FB_ONE_OF_ALL);
+  }
+
   // this annotation has shown to be useful, finish those before others
   if (qe->ann != NULL &&
       (qe->ann->type == ANN_MIN_SINGLE || qe->ann->type == ANN_MIN_CONTEXT)
@@ -2797,10 +2802,6 @@ int calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) {
   // normal queue entry
   if (qe->ann == NULL) {
     return update_totals(afl, qe, FB_BASE);
-  }
-
-  if (qe->ann->type == ANN_META_NODE) {
-    return update_totals(afl, qe, FB_ONE_OF_ALL);
   }
 
   // candidates are more interesting until we gave them enough time
@@ -2839,7 +2840,7 @@ int skip_queue_file(afl_state_t * afl, struct queue_entry * qe) {
 
   // skip if higher priority queue entries are available
   int qe_fuzz_bucket = calculate_fuzz_bucket(afl, qe);
-  for (int i = 0; i < PRIORITY_FB; i++) {
+  for (int i = PRIORITY_FB_START; i < PRIORITY_FB_END; i++) {
     if (afl->totals_fuzz_level[i] > 0) {
       if (qe_fuzz_bucket > i) {
         return 1;
