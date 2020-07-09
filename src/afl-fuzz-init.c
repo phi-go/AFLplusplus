@@ -2760,7 +2760,7 @@ static void leave_best_min_max_annotation_queue_files(afl_state_t * afl, annotat
 #define PRIORITY_FB FB_BASE
 
 static int update_totals(afl_state_t * afl, struct queue_entry * qe, int fuzz_bucket) {
-  if (qe->fuzz_level != fuzz_bucket) {
+  if (qe->fuzz_bucket != fuzz_bucket) {
     --afl->totals_fuzz_level[qe->fuzz_bucket];
     ++afl->totals_fuzz_level[fuzz_bucket];
     qe->fuzz_bucket = fuzz_bucket;
