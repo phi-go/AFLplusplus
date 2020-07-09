@@ -538,6 +538,17 @@ static void write_crash_readme(afl_state_t *afl) {
 
 }
 
+static int knows_hash(annotation_t * ann, uint64_t contender) {
+  if (get_head(&ann->meta_node_hashes)->next) {
+    LIST_FOREACH(&ann->meta_node_hashes, uint64_t, {
+      if (contender == *el) {
+        return 1;
+      }
+    });
+  }
+  return 0;
+}
+
 
 /* Check if the result of an execve() during routine fuzzing is interesting,
    save or queue the input test case for further analysis if so. Returns 1 if
@@ -637,6 +648,25 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
                 }
               }
               break;
+            case ANN_MIN_CONTEXT:
+              {
+                if (num_writes > 0) {
+                  for (int i = 0; i < ANNOTATION_RESULT_SIZE; i++) {
+                    uint64_t contender = el->shm_addr->result.best_values[i];
+                    if (contender < el->cur_best.best_values[i]) {
+                      if (el->cur_best.best_values[i] == UINT64_MAX) {
+                        candidate = 1;
+                      }
+                      el->cur_best.best_values[i] = contender;
+                      improvement += 1;
+                      if (i > el->max_pos) { el->max_pos = i; }
+                      ann_best_for_pos[i] = 1;
+                      zmq_send_annotation_update(afl, el->id, i, contender);
+                    }
+                  }
+                }
+              }
+              break;
             case ANN_SET:
               {
                 uint8_t * bitmap = el->shm_addr->result.set_hash_map;
@@ -683,6 +713,21 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
                   hne = el->id;
                 }
                 improvement = 0; // not a normal annotation, it does not get own queue files
+              }
+              break;
+            case ANN_META_NODE:
+              {
+                if (num_writes > 0) {
+                  uint64_t contender = el->shm_addr->result.best_values[0];
+                  if (knows_hash(el, contender)) {
+                    break;
+                  }
+                  uint64_t * contender_ptr = malloc(sizeof(contender));
+                  *contender_ptr = contender;
+                  list_append(&el->meta_node_hashes, contender_ptr);
+                  improvement += 1;
+                  zmq_send_annotation_update(afl, el->id, 0, contender);
+                }
               }
               break;
             default:

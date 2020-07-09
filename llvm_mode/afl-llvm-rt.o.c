@@ -558,12 +558,13 @@ struct BBReq {
   X(END_REG) \
   \
   X(START_FUNC) \
-  X(CALC_ABS) X(CALC_SUB) X(CALC_AND) X(CALC_HAMMING) X(CALC_HAMMING_FOR) \
+  X(CALC_ABS) X(CALC_SUB) X(CALC_SUB_UNSIGNED_NO_UNDERFLOW) X(CALC_AND) X(CALC_MAX) X(CALC_HAMMING) \
+  X(CALC_HAMMING_FOR) X(SWITCH) X(CONTEXTUALIZE) X(CHECK_CONTEXT) \
   X(END_FUNC) \
   \
   X(START_GOAL) \
   X(GOAL_MIN_SINGLE) X(GOAL_SET) X(GOAL_MAX_SINGLE) X(GOAL_MIN_ITER) X(GOAL_MAX_ITER) X(GOAL_EDGE_COV) \
-  X(GOAL_EDGE_MEM_COV) \
+  X(GOAL_EDGE_MEM_COV) X(GOAL_META_NODE) X(GOAL_MIN_CONTEXT) \
   X(END_GOAL) \
   \
   X(MAX_BYTE_CODE)
@@ -618,6 +619,7 @@ typedef struct action {
   annotation_byte_code_t * byte_code;
   struct action * annotation_next;
   struct action * pos_next;
+  int active;
   annotation_t * annotation;
 } action_t;
 
@@ -626,6 +628,7 @@ typedef struct annotation {
   int shm_id;
   shm_content_t * shm_addr;
   action_t * actions;
+  int context;
   UT_hash_handle hh;
   UT_hash_handle hh_active;
 } annotation_t;
@@ -908,16 +911,19 @@ static uint64_t bc_get_mem(annotation_byte_code_t segment_reg,
   }
 }
 
+static uint64_t calc_hash(uint64_t x) {
+  x = (x ^ (x >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
+  x = (x ^ (x >> 27)) * UINT64_C(0x94d049bb133111eb);
+  return x ^ (x >> 31);
+}
+
 static void set_bit_in_hashmap(uint64_t x, shm_content_t * shm, int verbose) {
   uint8_t * annotation_res = shm->result.set_hash_map;
 
   if (verbose) { FPRINTF_TO_ERR_FILE("num write: %d ", shm->num_writes_during_run); }
   if (verbose) { FPRINTF_TO_ERR_FILE("val: %llx ", x); }
 
-  // hash it
-  x = (x ^ (x >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
-  x = (x ^ (x >> 27)) * UINT64_C(0x94d049bb133111eb);
-  x = x ^ (x >> 31);
+  x = calc_hash(x);
 
   if (verbose) { FPRINTF_TO_ERR_FILE("hashed: %llx ", x); }
 
@@ -983,12 +989,36 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
           BC_PUSH(a & b);
         }
         break;
+      case CALC_MAX:
+        {
+          int64_t a, b;
+          BC_POP(a);
+          BC_POP(b);
+          if (a > b) {
+            BC_PUSH(a);
+          } else {
+            BC_PUSH(b);
+          }
+        }
+        break;
       case CALC_SUB:
+        {
+          int64_t a, b;
+          BC_POP(a);
+          BC_POP(b);
+          BC_PUSH(a - b);
+        }
+        break;
+      case CALC_SUB_UNSIGNED_NO_UNDERFLOW:
         {
           uint64_t a, b;
           BC_POP(a);
           BC_POP(b);
-          BC_PUSH(a - b);
+          if (b > a) {
+            BC_PUSH(0);
+          } else {
+            BC_PUSH(a - b);
+          }
         }
         break;
       case CALC_ABS:
@@ -997,6 +1027,15 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
           BC_POP(val);
           val = labs(val);
           BC_PUSH(val);
+        }
+        break;
+      case SWITCH:
+        {
+          uint64_t a, b;
+          BC_POP(a);
+          BC_POP(b);
+          BC_PUSH(a);
+          BC_PUSH(b);
         }
         break;
       case CALC_HAMMING:
@@ -1098,12 +1137,75 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
           edge_cov_target = target;
           edge_cov_action = action;
           should_restore_bp |= 0;
+          action->active = 0;
         }
         break;
       case GOAL_EDGE_MEM_COV:
         {
           edge_cov_target = 0;  // In band signal for unknown targets, new ones are important.
           edge_cov_action = action;
+          should_restore_bp |= 1;
+        }
+        break;
+      case GOAL_META_NODE:
+        {
+          annotation_t * annotation = action->annotation;
+          NULL_CHECK(annotation->shm_addr);
+          shm_content_t * shm = annotation->shm_addr;
+          uint64_t x;
+          BC_PEEK(x);
+          if (shm->num_writes_during_run == 0) {
+              shm->result.best_values[0] = calc_hash(x);
+          } else {
+            shm->result.best_values[0] = calc_hash(shm->result.best_values[0] ^ x);
+          }
+          shm->num_writes_during_run++;
+          should_restore_bp |= 0;
+          action->active = 0;
+        }
+        break;
+      case CONTEXTUALIZE:
+        {
+          annotation_t * annotation = action->annotation;
+          NULL_CHECK(annotation->shm_addr);
+          uint64_t x;
+          BC_PEEK(x);
+          if (annotation->context == -1) {
+            annotation->context = x;
+          } else {
+            annotation->context |= x;
+          }
+        }
+        break;
+      case CHECK_CONTEXT:
+        {
+          annotation_t * annotation = action->annotation;
+          NULL_CHECK(annotation->shm_addr);
+          if (annotation->context == -1) {
+            return;
+          }
+        }
+        break;
+      case GOAL_MIN_CONTEXT:
+        {
+          // TODO this is not thread safe
+          annotation_t * annotation = action->annotation;
+          NULL_CHECK(annotation->shm_addr);
+          shm_content_t * shm = annotation->shm_addr;
+          uint64_t res;
+          BC_PEEK(res);
+          if (annotation->context == -1) {
+            return;
+          }
+          if (annotation->context > ANNOTATION_RESULT_SIZE) {
+            FPRINTF_TO_ERR_FILE("context too large ignoring %d > %d\n", annotation->context, ANNOTATION_RESULT_SIZE);
+            return;
+          }
+          if (res < shm->result.best_values[annotation->context]) {
+            FPRINTF_TO_ERR_FILE("context: %d %d %lx / %lx\n", annotation->id, annotation->context, res, shm->result.best_values[annotation->context]);
+            shm->result.best_values[annotation->context] = res;
+            shm->num_writes_during_run++;
+          }
           should_restore_bp |= 1;
         }
         break;
@@ -1133,8 +1235,11 @@ static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
       action_t * act = actions->actions;
       LL_FOREACH2(actions->actions, act, pos_next) {
         int verbose = act->pos == (uint8_t*)0x0; // for debugging purposes
-        if (verbose) { FPRINTF_TO_ERR_FILE("Execution annotations for %p\n", act->pos); }
-        exec_annotation(act->byte_code, act->byte_code_len, ctx, act, verbose);
+        if (verbose) { FPRINTF_TO_ERR_FILE("Execution annotations for %p active: %d\n",
+                                           act->pos, 1); }
+        if (act->active) {
+          exec_annotation(act->byte_code, act->byte_code_len, ctx, act, verbose);
+        }
       }
 
       act = actions->actions;
@@ -1344,6 +1449,7 @@ static void handle_ann_req(void) {
     raise(SIGSTOP);
     _exit(1);
   }
+  ann->context = -1;
   HASH_ADD_INT(annotations_map, id, ann);
 
   {
@@ -1376,6 +1482,7 @@ static void handle_ann_req(void) {
     }
     action->byte_code = action_byte_code;
     action->annotation = ann;
+    action->active = 1;
     action->annotation_next = NULL;
     action->pos_next = NULL;
 
@@ -1403,11 +1510,82 @@ static void handle_ann_req(void) {
   // print_annotations();
 }
 
+static void handle_add_action_req() {
+  int ann_id;
+  READ_FROM_COMMAND_PIPE(ann_id);
+
+  annotation_t * ann;
+  HASH_FIND_INT(annotations_map, &ann_id, ann);
+  if (ann == NULL) {
+      FPRINTF_TO_ERR_FILE("expected annotation for %d to exist\n", ann_id);
+      raise(SIGSTOP);
+      _exit(1);
+  }
+
+  int is_active = 0;
+
+  {
+    annotation_t * active_ann;
+    HASH_FIND(hh_active, active_annotations_map, &ann->id, sizeof(int), active_ann);
+    if (active_ann != NULL) {
+      is_active = 1;
+    }
+  }
+
+  uint8_t * action_pos = 0;
+  READ_FROM_COMMAND_PIPE(action_pos);
+  if (action_pos == NULL) {
+    FPRINTF_TO_ERR_FILE("action pos should not be NULL\n");
+    raise(SIGSTOP);
+    _exit(1);
+  }
+
+  action_t * action = calloc(1, sizeof(*action));
+  NULL_CHECK(action);
+  action->pos = action_pos;
+  READ_FROM_COMMAND_PIPE(action->instruction_size);
+  READ_FROM_COMMAND_PIPE2(&action->instruction_bytes, action->instruction_size);
+  READ_FROM_COMMAND_PIPE(action->byte_code_len);
+  annotation_byte_code_t * action_byte_code = calloc(action->byte_code_len, sizeof(*action_byte_code));
+  NULL_CHECK(action_byte_code);
+  int i = 0;
+  while (i < action->byte_code_len) {
+    READ_FROM_COMMAND_PIPE2(&(action_byte_code[i++]), sizeof(*action_byte_code));
+  }
+  action->byte_code = action_byte_code;
+  action->annotation = ann;
+  action->annotation_next = NULL;
+  action->active = 1;
+  action->pos_next = NULL;
+
+  // get action list for position
+  pos_actions_t * pos_actions;
+  HASH_FIND_PTR(pos_actions_map, &action->pos, pos_actions);
+
+  // if action list does not exist -> create it
+  if (pos_actions == NULL) {
+    pos_actions = calloc(1, sizeof(*pos_actions));
+    NULL_CHECK(pos_actions);
+    pos_actions->pos = action->pos;
+    pos_actions->actions = NULL;
+    HASH_ADD_PTR(pos_actions_map, pos, pos_actions);
+  }
+
+  // insert action struct
+  LL_PREPEND2(pos_actions->actions, action, pos_next);
+  LL_PREPEND2(ann->actions, action, annotation_next);
+
+  if (is_active) {
+    // set breakpoint to enable action
+    set_breakpoint(action, /*quiet*/ 1);
+  }
+
+}
+
 static void handle_deann_req(void) {
   int id = 0;
   READ_FROM_COMMAND_PIPE(id);
   remove_annotation(id);
-  // TODO return command success?
 }
 
 static void handle_activate_annotation() {
@@ -1498,7 +1676,7 @@ static void __afl_start_forkserver(void) {
   } else {
     if ((put_err_log_fp = fopen(put_log_path, "a")) == NULL) {
       fprintf(stderr, "Can't open error log file: %s\n", strerror(errno));
-    } else {
+      put_err_log_fp = NULL;
     }
   }
   FPRINTF_TO_ERR_FILE("PUT starting up\n");
@@ -1595,6 +1773,8 @@ static void __afl_start_forkserver(void) {
         handle_ann_req();
       } else if (strncmp("DANR", cmd, 4) == 0) {
         handle_deann_req();
+      } else if (strncmp("AACT", cmd, 4) == 0) {
+        handle_add_action_req();
       } else {
         FPRINTF_TO_ERR_FILE("fuzzee unknown command: %s\n", cmd);
       }

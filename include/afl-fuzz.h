@@ -129,7 +129,8 @@ extern s32
     interesting_32[INTERESTING_8_LEN + INTERESTING_16_LEN + INTERESTING_32_LEN];
 
 typedef enum {ANN_MIN_SINGLE, ANN_SET, ANN_MAX_SINGLE, ANN_MIN_ITER, ANN_MAX_ITER,
-              ANN_EDGE_COV, ANN_EDGE_MEM_COV} annotation_type_t;
+              ANN_EDGE_COV, ANN_EDGE_MEM_COV, ANN_META_NODE, ANN_MIN_CONTEXT,
+              ANN_NUMBER_OF_TYPES} annotation_type_t;
 #define NUM_FUZZ_BUCKETS 16
 
 struct queue_entry;
@@ -148,6 +149,7 @@ typedef struct annotation {
   int num_corresponding_queue_files;
   int new_ann_queue_files;
   struct queue_entry * newest_qe;
+  list_t meta_node_hashes;
 } annotation_t;
 
 struct queue_entry {

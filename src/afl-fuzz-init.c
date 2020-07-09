@@ -2574,6 +2574,10 @@ static void __zmq_annotation_req(afl_state_t * afl) {
     case ANN_MIN_ITER:
       memset(ann->cur_best.best_values, '\xFF', sizeof(ann->cur_best.best_values));
       break;
+    case ANN_MIN_CONTEXT:
+      memset(ann->cur_best.best_values, '\xFF', sizeof(ann->cur_best.best_values));
+      memset(ann->shm_addr->result.best_values, '\xFF', sizeof(ann->cur_best.best_values));
+      break;
     case ANN_MAX_SINGLE:
     case ANN_MAX_ITER:
       memset(ann->cur_best.best_values, 0, sizeof(ann->cur_best.best_values));
@@ -2586,6 +2590,9 @@ static void __zmq_annotation_req(afl_state_t * afl) {
       break;
     case ANN_EDGE_MEM_COV:
       memset(ann->cur_best.set_hash_map, 0, sizeof(ann->cur_best.set_hash_map));
+      break;
+    case ANN_META_NODE:
+      memset(ann->cur_best.best_values, 0, sizeof(ann->cur_best.best_values));
       break;
     default:
       FATAL("Unknown annotation type %d", ann->type);
@@ -2637,6 +2644,49 @@ static void __zmq_annotation_req(afl_state_t * afl) {
   zmq_dec_credit(afl);
 }
 
+static void __zmq_add_action_req(afl_state_t * afl) {
+  int ann_id;
+  Z_READ(&ann_id, sizeof(ann_id));
+
+  char cmd[4] = "AACT";
+  write_to_command_pipe(&cmd, 4);
+  write_to_command_pipe(&ann_id, sizeof(ann_id));
+
+  uint8_t * action_pos;
+  Z_READ(&action_pos, sizeof(action_pos));
+  write_to_command_pipe(&action_pos, sizeof(action_pos));
+
+  uint8_t instruction_size;
+  Z_READ(&instruction_size, sizeof(instruction_size));
+  if (instruction_size > MAX_INSTRUCTION_SIZE) {
+    FATAL("Instruction is longer %d than expected.", instruction_size);
+  }
+  write_to_command_pipe(&instruction_size, sizeof(instruction_size));
+
+  char instruction_bytes[MAX_INSTRUCTION_SIZE] = {0};
+  Z_READ(&instruction_bytes, instruction_size);
+  write_to_command_pipe(&instruction_bytes, instruction_size);
+
+  int byte_code_len;
+  Z_READ(&byte_code_len, sizeof(byte_code_len));
+  write_to_command_pipe(&byte_code_len, sizeof(byte_code_len));
+
+  int i = 0;
+  while (i < byte_code_len) {
+    enum { ignored } byte_code;
+    Z_READ(&byte_code, sizeof(byte_code));
+    write_to_command_pipe(&byte_code, sizeof(byte_code));
+    i++;
+  }
+
+  zmq_maybe_wait_for_credit(afl);
+  z_send("FAAR", 4, 0);
+#ifdef CREDIT_DEBUG
+  SAYF("ann enable ann %d\n", afl->zmq_credit);
+#endif
+  zmq_dec_credit(afl);
+}
+
 void remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann) {
   if (get_head(&ann->corresponding_queue_files)->next) {
     LIST_FOREACH(&ann->corresponding_queue_files, struct queue_entry, {
@@ -2649,13 +2699,13 @@ void remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann) {
 static void leave_best_min_max_annotation_queue_files(afl_state_t * afl, annotation_t * ann) {
   if (!ann->new_ann_queue_files) { return; }
   if (ann->type != ANN_MIN_SINGLE && ann->type != ANN_MAX_SINGLE
-      && ann->type != ANN_MIN_ITER && ann->type != ANN_MAX_ITER) {
+      && ann->type != ANN_MIN_ITER && ann->type != ANN_MAX_ITER
+      && ann-> type != ANN_MIN_CONTEXT) {
     FATAL("this function is only for ann max and min");
   }
   int until = 1;
-  if (ann->type == ANN_MIN_ITER || ann->type == ANN_MAX_ITER) {
+  if (ann->type == ANN_MIN_ITER || ann->type == ANN_MAX_ITER || ann->type == ANN_MIN_CONTEXT) {
     until = SIZEOF_FIELD(struct queue_entry, ann_best_for_pos);
-    SAYF("until %d\n", until);
   }
   if (get_head(&ann->corresponding_queue_files)->next) {
     LIST_FOREACH(&ann->corresponding_queue_files, struct queue_entry, {
@@ -2666,6 +2716,7 @@ static void leave_best_min_max_annotation_queue_files(afl_state_t * afl, annotat
           switch(ann->type) {
             case ANN_MIN_SINGLE:
             case ANN_MIN_ITER:
+            case ANN_MIN_CONTEXT:
               if (ann->cur_best.best_values[i] == 0) {
                 // best possible so no longer interesting
                 continue;
@@ -2696,16 +2747,30 @@ static void leave_best_min_max_annotation_queue_files(afl_state_t * afl, annotat
   ann->new_ann_queue_files = 0;
 }
 
-#define CANDIDATE_GRACE_PERIOD 32
+#define CANDIDATE_GRACE_PERIOD 8
+#define USEFUL_GRACE_PERIOD 16
 
 #define FB_MIN_SINGLE 0
 #define FB_CANDIDATE 1
 #define FB_BASE 2
+#define FB_ONE_OF_ALL 3
+#define FB_ONE_IN_TWENTY 4
+
+#define PRIORITY_FB FB_BASE
 
 int calculate_fuzz_bucket(struct queue_entry * qe) {
+  if (qe->fuzz_level < CANDIDATE_GRACE_PERIOD) {
+    return FB_CANDIDATE;
+  }
+
+
   // normal queue entry
   if (qe->ann == NULL) {
     return FB_BASE;
+  }
+
+  if (qe->ann->type == ANN_META_NODE) {
+    return FB_ONE_OF_ALL;
   }
 
   // candidates are more interesting until we gave them enough time
@@ -2713,20 +2778,23 @@ int calculate_fuzz_bucket(struct queue_entry * qe) {
     if (qe->fuzz_level < CANDIDATE_GRACE_PERIOD) {
       return FB_CANDIDATE;
     } else {
-      return FB_BASE;
+      // candidates have 1 in 20 chance to get fuzzed, many annotations can never get better
+      // after their initial value, this is to limit their impact on performance
+      return FB_ONE_IN_TWENTY;
     }
   }
 
   // this annotation has shown to be useful, finish those before others
-  if (qe->ann->type == ANN_MIN_SINGLE
+  if ((qe->ann->type == ANN_MIN_SINGLE || qe->ann->type == ANN_MIN_CONTEXT)
       && qe->ann->times_improved > 1) {
-    if (qe->fuzz_level < 32) {
+    if (qe->fuzz_level < USEFUL_GRACE_PERIOD) {
       return FB_MIN_SINGLE;
     } else {
       return FB_BASE;
     }
   }
-  FATAL("Did not consider this qe constellation.");
+  WARNF("Did not consider this qe constellation.");
+  return FB_BASE;
 }
 
 int skip_queue_file(afl_state_t * afl, struct queue_entry * qe) {
@@ -2748,23 +2816,26 @@ int skip_queue_file(afl_state_t * afl, struct queue_entry * qe) {
   //   }
   // }
 
-  if (qe->fuzz_level > CANDIDATE_GRACE_PERIOD && qe->ann_candidate && rand_below(afl, 20) != 0) {
-    // candidates have 1 in 20 chance to get fuzzed, many annotations can never get better
-    // after their initial value, this is to limit their impact on performance
-    return 1;
-  }
-
   // skip if higher priority queue entries are available
   int qe_fuzz_bucket = calculate_fuzz_bucket(qe);
-  for (int i = 0; i < NUM_FUZZ_BUCKETS; i++) {
+  for (int i = 0; i < PRIORITY_FB; i++) {
     if (afl->totals_fuzz_level[i] > 0) {
       if (qe_fuzz_bucket > i) {
         return 1;
       } else {
-        return 0;
+        break;
       }
     }
   }
+
+  if (qe_fuzz_bucket == FB_ONE_OF_ALL) {
+    return (rand_below(afl, qe->ann->num_corresponding_queue_files) != 0);
+  }
+
+  if (qe_fuzz_bucket == FB_ONE_IN_TWENTY) {
+    return (rand_below(afl, 20) != 0);
+  }
+
   return 0;
 }
 
@@ -2776,7 +2847,7 @@ void clean_up_annotation_queue_files(afl_state_t * afl) {
         case ANN_MAX_SINGLE:
         case ANN_MIN_ITER:
         case ANN_MAX_ITER:
-          // qe->ann_pos is not needed for these annotations types so ignore
+        case ANN_MIN_CONTEXT:
           leave_best_min_max_annotation_queue_files(afl, el);
           break;
         case ANN_SET:
@@ -2785,6 +2856,9 @@ void clean_up_annotation_queue_files(afl_state_t * afl) {
         case ANN_EDGE_COV:
         case ANN_EDGE_MEM_COV:
           // has no own queue files so do nothing
+          break;
+        case ANN_META_NODE:
+          // keep all for now
           break;
         default:
           FATAL("Unknown annotation type %d", el->type);
@@ -2956,6 +3030,8 @@ void zmq_handle_commands(afl_state_t * afl) {
         __zmq_annotation_req(afl);
       } else if (strncmp("DANR", msg_type, MSG_SIZE) == 0) {
         __zmq_deannotation_req(afl);
+      } else if (strncmp("AACT", msg_type, MSG_SIZE) == 0) {
+        __zmq_add_action_req(afl);
       } else {
         fprintf(stderr, "ZMQ unknown message type: %s\n", msg_type);
       }
