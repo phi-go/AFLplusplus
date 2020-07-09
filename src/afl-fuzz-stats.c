@@ -865,6 +865,7 @@ void show_stats(afl_state_t *afl) {
   switch (el->type) { \
     case ANN_MIN_SINGLE: \
     case ANN_MIN_ITER: \
+    case ANN_MIN_ADDRESS: \
     { \
       int length = 0; \
       SAYF("\n" bV bSTOP cRST); \
@@ -879,6 +880,7 @@ void show_stats(afl_state_t *afl) {
     } break; \
     case ANN_MAX_SINGLE: \
     case ANN_MAX_ITER: \
+    case ANN_MAX_ADDRESS: \
     { \
       int length = 0; \
       SAYF("\n" bV bSTOP cRST); \
@@ -965,7 +967,8 @@ void show_stats(afl_state_t *afl) {
     SAYF(" %-74s ", "active annotations:");
     SAYF(SET_G1 bSTG bV);
     LIST_FOREACH(&afl->active_annotations, annotation_t, {
-      if (el->type != ANN_EDGE_COV && el->type != ANN_EDGE_MEM_COV && el->initialized == 1) {
+      if (el->type != ANN_EDGE_COV && el->type != ANN_EDGE_MEM_COV && el->type != ANN_SET
+          && el->initialized == 1 && el->times_improved > 1) {
         if (i++ < 40) {
           PRINT_ANNOTATION()
         }
@@ -980,7 +983,8 @@ void show_stats(afl_state_t *afl) {
     SAYF(SET_G1 bSTG bV);
     LIST_FOREACH(&afl->all_annotations, annotation_t, {
       total++;
-      if (el->type != ANN_EDGE_COV && el->type != ANN_EDGE_MEM_COV && el->initialized == 1) {
+      if (el->type != ANN_EDGE_COV && el->type != ANN_EDGE_MEM_COV && el->type != ANN_SET
+          && el->initialized == 1 && el->times_improved > 1) {
         if (i++ < 40) {
           PRINT_ANNOTATION()
         }

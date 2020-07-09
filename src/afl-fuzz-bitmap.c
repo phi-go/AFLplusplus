@@ -581,6 +581,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
         if (num_writes) {
           switch(el->type) {
             case ANN_MIN_SINGLE:
+            case ANN_MIN_ADDRESS:
               {
                 if (num_writes > 0) {
                   uint64_t contender = el->shm_addr->result.best_values[0];
@@ -598,6 +599,7 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
               }
               break;
             case ANN_MAX_SINGLE:
+            case ANN_MAX_ADDRESS:
               {
                 if (num_writes > 0) {
                   uint64_t contender = el->shm_addr->result.best_values[0];
