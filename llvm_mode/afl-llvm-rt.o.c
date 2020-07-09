@@ -558,7 +558,7 @@ struct BBReq {
   X(END_REG) \
   \
   X(START_FUNC) \
-  X(CALC_ABS) X(CALC_SUB) X(CALC_SUB_UNSIGNED_NO_UNDERFLOW) X(CALC_AND) X(CALC_MAX) X(CALC_HAMMING) \
+  X(CALC_ABS) X(CALC_SUB) X(CALC_SUB_UNSIGNED) X(CALC_AND) X(CALC_MAX) X(CALC_HAMMING) \
   X(CALC_HAMMING_FOR) X(SWITCH) X(CONTEXTUALIZE) X(CHECK_CONTEXT) \
   X(END_FUNC) \
   \
@@ -779,12 +779,14 @@ static void remove_breakpoint(action_t * action, int quiet) {
   V = *(stack_ptr-1);
 
 #define BC_PRINT_STACK() \
-  uint64_t * p = stack_ptr; \
-  FPRINTF_TO_ERR_FILE("^^^^^^^^^\n");  \
-  while (--p >= stack) { \
-    FPRINTF_TO_ERR_FILE("%p\t0x%x | %d\n", p, *p, *p);  \
-  } \
-  FPRINTF_TO_ERR_FILE("=========\n");
+  { \
+    uint64_t * p = stack_ptr; \
+    FPRINTF_TO_ERR_FILE("^^^^^^^^^\n");  \
+    while (--p >= stack) { \
+      FPRINTF_TO_ERR_FILE("%p\t0x%x | %d\n", p, *p, *p);  \
+    } \
+    FPRINTF_TO_ERR_FILE("=========\n"); \
+  }
 
 
 static uint64_t bc_get_reg(annotation_byte_code_t reg, ucontext_t * ctx, int allow_no_reg,
@@ -1003,22 +1005,30 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
         break;
       case CALC_SUB:
         {
-          int64_t a, b;
+          int64_t a, b, res;
           BC_POP(a);
           BC_POP(b);
-          BC_PUSH(a - b);
+          if (__builtin_sub_overflow(a, b, &res)) {
+            FPRINTF_TO_ERR_FILE("overflow\n");
+              if (res < 0) {
+                  res = INT64_MIN;
+              } else if (res > 0) {
+                  res = INT64_MAX;
+              }
+          }
+          BC_PUSH(res);
         }
         break;
-      case CALC_SUB_UNSIGNED_NO_UNDERFLOW:
+      case CALC_SUB_UNSIGNED:
         {
-          uint64_t a, b;
+          uint64_t a, b, res;
           BC_POP(a);
           BC_POP(b);
-          if (b > a) {
-            BC_PUSH(0);
-          } else {
-            BC_PUSH(a - b);
+          if (__builtin_sub_overflow(a, b, &res)) {
+              printf("overflow\n");
+              res = 0;
           }
+          BC_PUSH(res);
         }
         break;
       case CALC_ABS:
