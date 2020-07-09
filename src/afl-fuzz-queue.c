@@ -210,7 +210,7 @@ struct queue_entry * add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passe
   //   }
   // }
 
-  ++afl->totals_fuzz_level[calculate_fuzz_bucket(q)];
+  init_qe_fuzz_bucket(afl, q);
 
   afl->last_path_time = get_cur_time();
 
@@ -291,7 +291,7 @@ void remove_from_queue(afl_state_t *afl, struct queue_entry * q) {
   if (!q->was_fuzzed) --afl->pending_not_fuzzed;
   if (q->favored && afl->pending_favored > 0) --afl->pending_favored; // dont go below zero
 
-  --afl->totals_fuzz_level[calculate_fuzz_bucket(q)];
+  remove_qe_fuzz_bucket(afl, q);
   --afl->queued_paths;
 
   for (int i = 0; i < afl->fsrv.map_size; ++i) {

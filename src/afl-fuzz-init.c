@@ -2755,46 +2755,67 @@ static void leave_best_min_max_annotation_queue_files(afl_state_t * afl, annotat
 #define FB_BASE 2
 #define FB_ONE_OF_ALL 3
 #define FB_ONE_IN_TWENTY 4
+#define FB_UNINIT 5
 
 #define PRIORITY_FB FB_BASE
 
-int calculate_fuzz_bucket(struct queue_entry * qe) {
-  if (qe->fuzz_level < CANDIDATE_GRACE_PERIOD) {
-    return FB_CANDIDATE;
+static int update_totals(afl_state_t * afl, struct queue_entry * qe, int fuzz_bucket) {
+  if (qe->fuzz_level != fuzz_bucket) {
+    --afl->totals_fuzz_level[qe->fuzz_bucket];
+    ++afl->totals_fuzz_level[fuzz_bucket];
+    qe->fuzz_bucket = fuzz_bucket;
+  }
+  return fuzz_bucket;
+}
+
+void init_qe_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) {
+  qe->fuzz_bucket = FB_UNINIT;
+  ++afl->totals_fuzz_level[FB_UNINIT];
+  calculate_fuzz_bucket(afl, qe);
+}
+
+void remove_qe_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) {
+  --afl->totals_fuzz_level[qe->fuzz_bucket];
+}
+
+int calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) {
+  // this annotation has shown to be useful, finish those before others
+  if (qe->ann != NULL &&
+      (qe->ann->type == ANN_MIN_SINGLE || qe->ann->type == ANN_MIN_CONTEXT)
+      && qe->ann->times_improved > 1) {
+    if (qe->fuzz_level < USEFUL_GRACE_PERIOD) {
+      return update_totals(afl, qe, FB_MIN_SINGLE);
+    } else {
+      return update_totals(afl, qe, FB_BASE);
+    }
   }
 
+  if (qe->fuzz_level < CANDIDATE_GRACE_PERIOD) {
+    return update_totals(afl, qe, FB_CANDIDATE);
+  }
 
   // normal queue entry
   if (qe->ann == NULL) {
-    return FB_BASE;
+    return update_totals(afl, qe, FB_BASE);
   }
 
   if (qe->ann->type == ANN_META_NODE) {
-    return FB_ONE_OF_ALL;
+    return update_totals(afl, qe, FB_ONE_OF_ALL);
   }
 
   // candidates are more interesting until we gave them enough time
   if (qe->ann_candidate) {
     if (qe->fuzz_level < CANDIDATE_GRACE_PERIOD) {
-      return FB_CANDIDATE;
+      return update_totals(afl, qe, FB_CANDIDATE);
     } else {
       // candidates have 1 in 20 chance to get fuzzed, many annotations can never get better
       // after their initial value, this is to limit their impact on performance
-      return FB_ONE_IN_TWENTY;
+      return update_totals(afl, qe, FB_ONE_IN_TWENTY);
     }
   }
 
-  // this annotation has shown to be useful, finish those before others
-  if ((qe->ann->type == ANN_MIN_SINGLE || qe->ann->type == ANN_MIN_CONTEXT)
-      && qe->ann->times_improved > 1) {
-    if (qe->fuzz_level < USEFUL_GRACE_PERIOD) {
-      return FB_MIN_SINGLE;
-    } else {
-      return FB_BASE;
-    }
-  }
   WARNF("Did not consider this qe constellation.");
-  return FB_BASE;
+  return update_totals(afl, qe, FB_BASE);
 }
 
 int skip_queue_file(afl_state_t * afl, struct queue_entry * qe) {
@@ -2817,7 +2838,7 @@ int skip_queue_file(afl_state_t * afl, struct queue_entry * qe) {
   // }
 
   // skip if higher priority queue entries are available
-  int qe_fuzz_bucket = calculate_fuzz_bucket(qe);
+  int qe_fuzz_bucket = calculate_fuzz_bucket(afl, qe);
   for (int i = 0; i < PRIORITY_FB; i++) {
     if (afl->totals_fuzz_level[i] > 0) {
       if (qe_fuzz_bucket > i) {
