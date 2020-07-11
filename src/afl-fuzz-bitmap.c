@@ -754,24 +754,24 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
             if(calibrate_case(afl, q, mem, afl->queue_cycle - 1, 0) == FSRV_RUN_ERROR) {
               FATAL("Unable to execute target application");
             }
+
+            fd = open(queue_fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
+            if (unlikely(fd < 0)) PFATAL("Unable to create '%s'", queue_fn);
+            ck_write(fd, mem, len, queue_fn);
+            close(fd);
+
+            // if not initialized we are not fuzzing a queue file for this annotation
+            // as this annotation can not have any queue files
+            // we only wanted to get a first value for this annotation which we now found
+            // disable this annotation to minimize runtime overhead
+            if (!el->initialized) {  
+              el->initialized = 1;
+              disable_annotation(afl, el);
+              LIST_REMOVE_CURRENT_EL_IN_FOREACH();
+            }
+
+            zmq_send_file_path(afl, q);
           }
-
-          fd = open(queue_fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
-          if (unlikely(fd < 0)) PFATAL("Unable to create '%s'", queue_fn);
-          ck_write(fd, mem, len, queue_fn);
-          close(fd);
-
-          // if not initialized we are not fuzzing a queue file for this annotation
-          // as this annotation can not have any queue files
-          // we only wanted to get a first value for this annotation which we now found
-          // disable this annotation to minimize runtime overhead
-          if (!el->initialized) {  
-            el->initialized = 1;
-            disable_annotation(afl, el);
-            LIST_REMOVE_CURRENT_EL_IN_FOREACH();
-          }
-
-          zmq_send_file_path(afl, queue_fn, /* execs */ 1);
         }
       });
     }
@@ -805,36 +805,36 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
         q->trim_done = 1;  // As trimming only checks the aflpp instrumentation,
                             // trimming can remove important information needed for annotations
       }
+
+      if (hnb == 2) {
+
+        afl->queue_top->has_new_cov = 1;
+        ++afl->queued_with_cov;
+
+      }
+
+      afl->queue_top->exec_cksum = cksum;
+
+      /* Try to calibrate inline; this also calls update_bitmap_score() when
+        successful. */
+
+      res = calibrate_case(afl, afl->queue_top, mem, afl->queue_cycle - 1, 0);
+
+      if (unlikely(res == FSRV_RUN_ERROR)) {
+
+        FATAL("Unable to execute target application");
+
+      }
+
+      fd = open(queue_fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
+      if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", queue_fn); }
+      ck_write(fd, mem, len, queue_fn);
+      close(fd);
+
+      zmq_send_file_path(afl, q);
+
+      keeping = 1;
     }
-
-    if (hnb == 2) {
-
-      afl->queue_top->has_new_cov = 1;
-      ++afl->queued_with_cov;
-
-    }
-
-    afl->queue_top->exec_cksum = cksum;
-
-    /* Try to calibrate inline; this also calls update_bitmap_score() when
-       successful. */
-
-    res = calibrate_case(afl, afl->queue_top, mem, afl->queue_cycle - 1, 0);
-
-    if (unlikely(res == FSRV_RUN_ERROR)) {
-
-      FATAL("Unable to execute target application");
-
-    }
-
-    fd = open(queue_fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
-    if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", queue_fn); }
-    ck_write(fd, mem, len, queue_fn);
-    close(fd);
-
-    zmq_send_file_path(afl, queue_fn, /* execs */ 1);
-
-    keeping = 1;
 
   }
 
@@ -982,8 +982,6 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
   if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", fn); }
   ck_write(fd, mem, len, fn);
   close(fd);
-
-  zmq_send_file_path(afl, fn, /* execs */ 1);
 
   return keeping;
 

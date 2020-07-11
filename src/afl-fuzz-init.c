@@ -2443,18 +2443,11 @@ static void zmq_maybe_wait_for_credit(afl_state_t * afl) {
   }
 
 static int get_associated_annotation_id(afl_state_t * afl, struct queue_entry * cur_entry) {
-  int id = -1;
-  if (get_head(&afl->all_annotations)->next) {
-    LIST_FOREACH(&afl->all_annotations, annotation_t, {
-      if (get_head(&el->corresponding_queue_files)->next) {
-        if (list_contains(&el->corresponding_queue_files, cur_entry)) {
-          id = el->id;
-          break;
-        }
-      }
-    });
+  if (cur_entry->ann == NULL) {
+    return -1;
+  } else {
+    return cur_entry->ann->id;
   }
-  return id;
 }
 
 void zmq_send_queue_entry_removal(afl_state_t * afl, struct queue_entry * qe) {
@@ -2484,12 +2477,13 @@ void zmq_send_exec_update(afl_state_t * afl, struct queue_entry * cur_entry, u64
   }
 }
 
-void zmq_send_file_path(afl_state_t * afl, char * file_path, u64 execs) {
+void zmq_send_file_path(afl_state_t * afl, struct queue_entry * qe) {
   if (afl->zmq_socket) {
+    int associated_ann_id = get_associated_annotation_id(afl, qe);
     zmq_maybe_wait_for_credit(afl);
     z_send("F_QN", 4, ZMQ_SNDMORE);
-    z_send(&execs, sizeof(execs), ZMQ_SNDMORE);
-    z_send(file_path, strlen(file_path), 0);
+    z_send(qe->fname, strlen(qe->fname), ZMQ_SNDMORE);
+    z_send(&associated_ann_id, sizeof(associated_ann_id), 0);
 #ifdef CREDIT_DEBUG
     SAYF("file path %d\n", afl->zmq_credit);
 #endif
@@ -2799,14 +2793,14 @@ int calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) {
   if (qe->ann != NULL &&
       (qe->ann->type == ANN_MIN_SINGLE || qe->ann->type == ANN_MIN_CONTEXT)
       && qe->ann->times_improved > 1) {
-    if (qe->fuzz_level < USEFUL_GRACE_PERIOD) {
+    if (qe->fuzz_level <= USEFUL_GRACE_PERIOD) {
       return update_totals(afl, qe, FB_MIN_SINGLE);
     } else {
       return update_totals(afl, qe, FB_BASE);
     }
   }
 
-  if (qe->fuzz_level < CANDIDATE_GRACE_PERIOD) {
+  if (qe->fuzz_level <= CANDIDATE_GRACE_PERIOD) {
     return update_totals(afl, qe, FB_CANDIDATE);
   }
 
@@ -2817,7 +2811,7 @@ int calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) {
 
   // candidates are more interesting until we gave them enough time
   if (qe->ann_candidate) {
-    if (qe->fuzz_level < CANDIDATE_GRACE_PERIOD) {
+    if (qe->fuzz_level <= CANDIDATE_GRACE_PERIOD) {
       return update_totals(afl, qe, FB_CANDIDATE);
     } else {
       // candidates have 1 in 20 chance to get fuzzed, many annotations can never get better

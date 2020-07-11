@@ -244,6 +244,8 @@ struct queue_entry * add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passe
 
 void remove_from_queue(afl_state_t *afl, struct queue_entry * q) {
 
+  if (q->id < afl->queue_cur->id) --afl->current_entry;
+
   if (afl->queue_cur == q) {
     afl->queue_cur = q->next;
   }
@@ -264,29 +266,27 @@ void remove_from_queue(afl_state_t *afl, struct queue_entry * q) {
     q->next->prev = q->prev;
   }
 
-  int q_pos = 0;
-  {
-    struct queue_entry *n = afl->queue, *last_100 = NULL;
-    int found = 0, cnt = 0;
-    while (n) {
+  // int q_pos = 0;
+  // {
+  //   struct queue_entry *n = afl->queue, *last_100 = NULL;
+  //   int found = 0, cnt = 0;
+  //   while (n) {
       
-      if (cnt % 100) {
-        n->next_100 = NULL;
-      } else {
-        if (last_100) {
-          last_100->next_100 = n;
-        }
-        last_100 = n;
-      }
+  //     if (cnt % 100) {
+  //       n->next_100 = NULL;
+  //     } else {
+  //       if (last_100) {
+  //         last_100->next_100 = n;
+  //       }
+  //       last_100 = n;
+  //     }
 
-      if (n == q) { found = 1; }
-      if (!found) { q_pos++; }
-      cnt++;
-      n = n->next;
-    }
-  }
-
-  if (q_pos < afl->current_entry) --afl->current_entry;
+  //     if (n == q) { found = 1; }
+  //     if (!found) { q_pos++; }
+  //     cnt++;
+  //     n = n->next;
+  //   }
+  // }
 
   if (!q->was_fuzzed) --afl->pending_not_fuzzed;
   if (q->favored && afl->pending_favored > 0) --afl->pending_favored; // dont go below zero

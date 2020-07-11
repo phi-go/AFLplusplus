@@ -184,8 +184,8 @@ struct queue_entry {
   u32 tc_ref;                           /* Trace bytes ref count            */
 
   struct queue_entry *next,             /* Next element, if any             */
-      *prev,                            /* Previous element, if any         */
-      *next_100;                        /* 100 elements ahead               */
+      *prev;                            /* Previous element, if any         */
+      // *next_100;                        /* 100 elements ahead               */
 
   annotation_t *ann;                    /* Belongs to this annotation if not NULL */
   u32 ann_pos;                          /* Is at that position for queue files belonging to this ann */
@@ -987,7 +987,7 @@ void   setup_signal_handlers(void);
 void   save_cmdline(afl_state_t *, u32, char **);
 void   connect_zmq(afl_state_t *);
 void   disconnect_zmq(afl_state_t *);
-void   zmq_send_file_path(afl_state_t *, char *, u64);
+void   zmq_send_file_path(afl_state_t *, struct queue_entry * qe);
 void   zmq_send_queue_entry_removal(afl_state_t * afl, struct queue_entry * qe);
 void   zmq_send_exec_update(afl_state_t *, struct queue_entry *, u64);
 void   zmq_send_annotation_update(afl_state_t *, int ann_id, u64 pos, u64 new_best);
