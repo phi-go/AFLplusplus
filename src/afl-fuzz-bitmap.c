@@ -574,6 +574,9 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     // keep if annotations are improved
     if (get_head(&afl->active_annotations)->next) {
       LIST_FOREACH(&afl->active_annotations, annotation_t, {
+        if (el->ignored) {
+          continue;
+        }
         int improvement = 0;
         int candidate = 0;
         u8 ann_best_for_pos[ANNOTATION_RESULT_SIZE] = { 0 };
@@ -842,6 +845,16 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
               disable_annotation(afl, el);
               LIST_REMOVE_CURRENT_EL_IN_FOREACH();
             }
+
+            // some annotations can create an unbounded amount of queue files
+            // ignore them if their number gets too large
+            if ((el->type == ANN_SET && el->num_corresponding_queue_files > 1024) 
+                || (el->type == ANN_META_NODE && el->num_corresponding_queue_files > 10000)) {
+                  el->ignored = 1;
+              disable_annotation(afl, el);
+              LIST_REMOVE_CURRENT_EL_IN_FOREACH();
+            }
+                 
 
             zmq_send_file_path(afl, q);
           }

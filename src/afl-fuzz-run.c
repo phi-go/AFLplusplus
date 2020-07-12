@@ -190,6 +190,8 @@ static void write_with_gap(afl_state_t *afl, void *mem, u32 len, u32 skip_at,
 
 u8 calibrate_case(afl_state_t *afl, struct queue_entry *q, u8 *use_mem,
                   u32 handicap, u8 from_queue) {
+  
+  disable_active_annotations(afl);
 
   u8 fault = 0, new_bits = 0, var_detected = 0,
      first_run = (q->exec_cksum == 0);
@@ -362,6 +364,8 @@ abort_calibration:
   afl->stage_max = old_sm;
 
   if (!first_run) { show_stats(afl); }
+
+  enable_active_annotations(afl);
 
   return fault;
 

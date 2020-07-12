@@ -2984,6 +2984,10 @@ void adjust_active_annotations(afl_state_t * afl, int set_all_active) {
   if (get_head(&afl->all_annotations)->next) {
     LIST_FOREACH(&afl->all_annotations, annotation_t, {
 
+      if (el->ignored) {
+        continue;
+      }
+
       if (set_all_active ||
           (!el->initialized && el->type != ANN_EDGE_COV && el->type != ANN_EDGE_MEM_COV) ||
           queue_entry_belongs_to_ann(el, afl->queue_cur)) {
@@ -3002,6 +3006,32 @@ void adjust_active_annotations(afl_state_t * afl, int set_all_active) {
         }
       }
 
+    });
+  }
+}
+
+void disable_active_annotations(afl_state_t * afl) {
+  if (get_head(&afl->active_annotations)->next) {
+    LIST_FOREACH(&afl->active_annotations, annotation_t, {
+
+      if (el->ignored) {
+        continue;
+      }
+
+      disable_annotation(afl, el);
+    });
+  }
+}
+
+void enable_active_annotations(afl_state_t * afl) {
+  if (get_head(&afl->active_annotations)->next) {
+    LIST_FOREACH(&afl->active_annotations, annotation_t, {
+
+      if (el->ignored) {
+        continue;
+      }
+
+      enable_annotation(afl, el);
     });
   }
 }

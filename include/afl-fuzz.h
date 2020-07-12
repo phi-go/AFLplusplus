@@ -149,6 +149,7 @@ typedef struct annotation {
   list_t corresponding_queue_files;
   int num_corresponding_queue_files;
   int new_ann_queue_files;
+  int ignored;
   struct queue_entry * newest_qe;
   list_t meta_node_hashes;
 } annotation_t;
@@ -1000,6 +1001,8 @@ int    calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe);
 int    skip_queue_file(afl_state_t * afl, struct queue_entry * qe);
 void   disable_annotation(afl_state_t * afl, annotation_t * ann);
 void   adjust_active_annotations(afl_state_t * afl, int);
+void   disable_active_annotations(afl_state_t * afl);
+void   enable_active_annotations(afl_state_t * afl);
 void   exchange_new_queue_files(afl_state_t * afl);
 
 /* CmpLog */
