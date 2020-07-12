@@ -563,8 +563,8 @@ struct BBReq {
   X(END_FUNC) \
   \
   X(START_GOAL) \
-  X(GOAL_MIN_SINGLE) X(GOAL_SET) X(GOAL_MAX_SINGLE) X(GOAL_MIN_ITER) X(GOAL_MAX_ITER) X(GOAL_EDGE_COV) \
-  X(GOAL_EDGE_MEM_COV) X(GOAL_META_NODE) X(GOAL_MIN_CONTEXT) \
+  X(GOAL_MIN_SINGLE) X(GOAL_SET) X(GOAL_MAX_SINGLE) X(GOAL_MIN_ITER) X(GOAL_MAX_ITER) X(GOAL_OVERFLOW_ADD) \
+  X(GOAL_EDGE_COV) X(GOAL_EDGE_MEM_COV) X(GOAL_META_NODE) X(GOAL_MIN_CONTEXT) \
   X(END_GOAL) \
   \
   X(MAX_BYTE_CODE)
@@ -1129,6 +1129,75 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
           should_restore_bp |= 1;
         }
         break;
+
+      case GOAL_OVERFLOW_ADD:
+        {
+          annotation_t * annotation = action->annotation;
+          NULL_CHECK(annotation->shm_addr);
+          shm_content_t * shm = annotation->shm_addr;
+
+          uint64_t a, b;
+          BC_POP(a);
+          BC_POP(b);
+
+          // unsigned overflow
+          {
+            uint64_t res;
+            if (__builtin_add_overflow((uint64_t)a, (uint64_t)b, &res)) {
+              // overflowed
+              shm->result.best_values[0] = 1;
+            } else {
+              res = UINT64_MAX - res;
+              if (res < shm->result.best_values[1]) {
+                shm->result.best_values[1] = res;
+              }
+            }
+          }
+
+          // unsigned underflow
+          {
+            uint64_t res;
+            if (__builtin_add_overflow((uint64_t)a, (uint64_t)b, &res)) {
+              shm->result.best_values[2] = 1;
+            } else {
+              res = 0 + res;
+              if (res < shm->result.best_values[3]) {
+                shm->result.best_values[3] = res;
+              }
+            }
+          }
+
+          // signed overflow
+          {
+            int64_t res;
+            if (__builtin_add_overflow((int64_t)a, (int64_t)b, &res)) {
+              shm->result.best_values[4] = 1;
+            } else {
+              res = INT64_MAX - res;
+              if (res < shm->result.best_values[5]) {
+                shm->result.best_values[5] = res;
+              }
+            }
+          }
+
+          // signed underflow
+          {
+            int64_t res;
+            if (__builtin_add_overflow((int64_t)a, (int64_t)b, &res)) {
+              shm->result.best_values[6] = 1;
+            } else {
+              res = 0 + res;
+              if (res < shm->result.best_values[7]) {
+                shm->result.best_values[7] = res;
+              }
+            }
+          }
+
+          shm->num_writes_during_run++;
+          should_restore_bp |= 1;
+        }
+        break;
+
       case GOAL_SET:
         {
           annotation_t * annotation = action->annotation;

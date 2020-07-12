@@ -866,6 +866,7 @@ void show_stats(afl_state_t *afl) {
     case ANN_MIN_SINGLE: \
     case ANN_MIN_ITER: \
     case ANN_MIN_ADDRESS: \
+    case ANN_OVERFLOW: \
     { \
       int length = 0; \
       SAYF("\n" bV bSTOP cRST); \

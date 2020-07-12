@@ -2567,6 +2567,7 @@ static void __zmq_annotation_req(afl_state_t * afl) {
     case ANN_MIN_SINGLE:
     case ANN_MIN_ITER:
     case ANN_MIN_ADDRESS:
+    case ANN_OVERFLOW:
       memset(ann->cur_best.best_values, '\xFF', sizeof(ann->cur_best.best_values));
       break;
     case ANN_MIN_CONTEXT:
@@ -2694,15 +2695,12 @@ void remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann) {
 
 static void leave_best_min_max_annotation_queue_files(afl_state_t * afl, annotation_t * ann) {
   if (!ann->new_ann_queue_files) { return; }
-  if (ann->type != ANN_MIN_SINGLE && ann->type != ANN_MAX_SINGLE
-      && ann->type != ANN_MIN_ITER && ann->type != ANN_MAX_ITER
-      && ann->type != ANN_MIN_ADDRESS && ann->type != ANN_MAX_ADDRESS
-      && ann-> type != ANN_MIN_CONTEXT) {
-    FATAL("this function is only for ann max and min");
-  }
   int until = 1;
   if (ann->type == ANN_MIN_ITER || ann->type == ANN_MAX_ITER || ann->type == ANN_MIN_CONTEXT) {
     until = SIZEOF_FIELD(struct queue_entry, ann_best_for_pos);
+  }
+  if (ann->type == ANN_OVERFLOW) {
+    until = 4;
   }
   if (get_head(&ann->corresponding_queue_files)->next) {
     LIST_FOREACH(&ann->corresponding_queue_files, struct queue_entry, {
@@ -2715,6 +2713,7 @@ static void leave_best_min_max_annotation_queue_files(afl_state_t * afl, annotat
             case ANN_MIN_ITER:
             case ANN_MIN_CONTEXT:
             case ANN_MIN_ADDRESS:
+            case ANN_OVERFLOW:
               if (ann->cur_best.best_values[i] == 0) {
                 // best possible so no longer interesting
                 continue;
@@ -2785,8 +2784,10 @@ int calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) {
   }
 
   if (qe->ann != NULL &&
-      (qe->ann->type == ANN_MIN_ADDRESS || qe->ann->type == ANN_MAX_ADDRESS)) {
-    return update_totals(afl, qe, FB_ONE_IN_TWENTY);
+      (qe->ann->type == ANN_MIN_ADDRESS
+       || qe->ann->type == ANN_MAX_ADDRESS
+       || qe->ann->type == ANN_OVERFLOW)) {
+    return update_totals(afl, qe, FB_BASE);
   }
 
   // this annotation has shown to be useful, finish those before others
@@ -2874,6 +2875,7 @@ void clean_up_annotation_queue_files(afl_state_t * afl) {
         case ANN_MAX_SINGLE:
         case ANN_MIN_ITER:
         case ANN_MAX_ITER:
+        case ANN_OVERFLOW:
         case ANN_MIN_ADDRESS:
         case ANN_MAX_ADDRESS:
         case ANN_MIN_CONTEXT:
