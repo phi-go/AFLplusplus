@@ -574,9 +574,6 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     // keep if annotations are improved
     if (get_head(&afl->active_annotations)->next) {
       LIST_FOREACH(&afl->active_annotations, annotation_t, {
-        if (el->ignored) {
-          continue;
-        }
         int improvement = 0;
         int candidate = 0;
         u8 ann_best_for_pos[ANNOTATION_RESULT_SIZE] = { 0 };

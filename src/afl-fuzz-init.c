@@ -2984,26 +2984,26 @@ void adjust_active_annotations(afl_state_t * afl, int set_all_active) {
   if (get_head(&afl->all_annotations)->next) {
     LIST_FOREACH(&afl->all_annotations, annotation_t, {
 
-      if (el->ignored) {
-        continue;
-      }
+      if (!el->ignored) {
 
-      if (set_all_active ||
-          (!el->initialized && el->type != ANN_EDGE_COV && el->type != ANN_EDGE_MEM_COV) ||
-          queue_entry_belongs_to_ann(el, afl->queue_cur)) {
+        if (set_all_active ||
+            (!el->initialized && el->type != ANN_EDGE_COV && el->type != ANN_EDGE_MEM_COV) ||
+            queue_entry_belongs_to_ann(el, afl->queue_cur)) {
 
-        if (!get_head(&afl->active_annotations)->next ||
-            !list_contains(&afl->active_annotations, el)) {
-          enable_annotation(afl, el);
-          list_append(&afl->active_annotations, el);
+          if (!get_head(&afl->active_annotations)->next ||
+              !list_contains(&afl->active_annotations, el)) {
+            enable_annotation(afl, el);
+            list_append(&afl->active_annotations, el);
+          }
+
+        } else {
+          if (get_head(&afl->active_annotations)->next &&
+              list_contains(&afl->active_annotations, el)) {
+            disable_annotation(afl, el);
+            list_remove(&afl->active_annotations, el);
+          }
         }
 
-      } else {
-        if (get_head(&afl->active_annotations)->next &&
-            list_contains(&afl->active_annotations, el)) {
-          disable_annotation(afl, el);
-          list_remove(&afl->active_annotations, el);
-        }
       }
 
     });
@@ -3014,11 +3014,8 @@ void disable_active_annotations(afl_state_t * afl) {
   if (get_head(&afl->active_annotations)->next) {
     LIST_FOREACH(&afl->active_annotations, annotation_t, {
 
-      if (el->ignored) {
-        continue;
-      }
-
       disable_annotation(afl, el);
+
     });
   }
 }
@@ -3027,11 +3024,12 @@ void enable_active_annotations(afl_state_t * afl) {
   if (get_head(&afl->active_annotations)->next) {
     LIST_FOREACH(&afl->active_annotations, annotation_t, {
 
-      if (el->ignored) {
-        continue;
+      if (!el->ignored) {
+
+        enable_annotation(afl, el);
+
       }
 
-      enable_annotation(afl, el);
     });
   }
 }
