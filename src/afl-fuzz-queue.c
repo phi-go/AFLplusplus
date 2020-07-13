@@ -244,7 +244,7 @@ struct queue_entry * add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passe
 
 void remove_from_queue(afl_state_t *afl, struct queue_entry * q) {
 
-  if (q->id < afl->queue_cur->id) --afl->current_entry;
+  if (afl->queue_cur && q->id < afl->queue_cur->id) --afl->current_entry;
 
   if (afl->queue_cur == q) {
     afl->queue_cur = q->next;
