@@ -2745,25 +2745,7 @@ static void leave_best_min_max_annotation_queue_files(afl_state_t * afl, annotat
   ann->new_ann_queue_files = 0;
 }
 
-#define CANDIDATE_GRACE_PERIOD 4
-#define USEFUL_GRACE_PERIOD 16
-#define ANCILLARY_FACTOR 2
-
-#define FB_MIN_SINGLE 0
-#define FB_CANDIDATE 1
-#define FB_BASE 2
-#define FB_ONE_IN_TWENTY 3
-#define FB_ONE_OF_ALL 4
-#define FB_ANCILLARY_CANDIDATE 5
-#define FB_ANCILLARY 6
-#define FB_ANCILLARY_ONE_IN_TWENTY 7
-#define FB_ANCILLARY_ONE_OF_ALL 8
-#define FB_UNINIT 9
-
-#define PRIORITY_FB_START FB_MIN_SINGLE
-#define PRIORITY_FB_END FB_CANDIDATE
-
-static int update_totals(afl_state_t * afl, struct queue_entry * qe, int fuzz_bucket) {
+static fuzz_bucket_t update_totals(afl_state_t * afl, struct queue_entry * qe, int fuzz_bucket) {
   if (qe->fuzz_bucket != fuzz_bucket) {
     --afl->totals_fuzz_level[qe->fuzz_bucket];
     ++afl->totals_fuzz_level[fuzz_bucket];
@@ -2782,7 +2764,7 @@ void remove_qe_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) {
   --afl->totals_fuzz_level[qe->fuzz_bucket];
 }
 
-int calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) {
+fuzz_bucket_t calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) {
   if (qe->ann == NULL) {
 
     if (qe->fuzz_level <= CANDIDATE_GRACE_PERIOD) {
@@ -2837,7 +2819,7 @@ int calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) {
     case ANN_META_NODE:
 
       if (qe->fuzz_level == 0) {
-        return update_totals(afl, qe, FB_CANDIDATE);
+        return update_totals(afl, qe, FB_ONE_IN_FIVE);
 
       } else {
         return update_totals(afl, qe, FB_ONE_OF_ALL);
@@ -2863,7 +2845,7 @@ int calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) {
     case ANN_SET:
 
       if (qe->fuzz_level == 0) {
-        return update_totals(afl, qe, FB_ANCILLARY_CANDIDATE);
+        return update_totals(afl, qe, FB_ANCILLARY_ONE_IN_FIVE);
 
       } else {
         return update_totals(afl, qe, FB_ANCILLARY_ONE_OF_ALL);
@@ -2886,28 +2868,11 @@ int calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) {
 }
 
 int skip_queue_file(afl_state_t * afl, struct queue_entry * qe) {
-  // template for more complicated skip conditions
-  // if (qe->ann == NULL) {
-  //   /* not an annotation queue file, do nothing special */
-  // } else {
-  //   switch(qe->ann->type) {
-  //     case ANN_MIN:
-  //     case ANN_MAX:
-  //       /* only best for position queue files, all equally interesting */
-  //       break;
-  //     case ANN_SET:
-  //       /* later set queue files are more interesting, prefer them slightly */
-  //       // if (rand_below(afl, qe->ann->num_corresponding_queue_files) > qe->ann_pos) { return 1; }
-  //       break;
-  //     default:
-  //       FATAL("Unknown annotation type %d", qe->ann->type);
-  //   }
-  // }
 
   // skip if higher priority queue entries are available
-  int fb = calculate_fuzz_bucket(afl, qe);
+  fuzz_bucket_t fb = calculate_fuzz_bucket(afl, qe);
 
-  for (int i = PRIORITY_FB_START; i <= PRIORITY_FB_END; i++) {
+  for (fuzz_bucket_t i = PRIORITY_FB_START; i <= PRIORITY_FB_END; i++) {
     if (afl->totals_fuzz_level[i] > 0) {
       if (fb > i) {
         return 1;
@@ -2930,6 +2895,9 @@ int skip_queue_file(afl_state_t * afl, struct queue_entry * qe) {
     case FB_BASE:
       return 0;
 
+    case FB_ONE_IN_FIVE:
+      return (rand_below(afl, 5) != 0);
+
     case FB_ONE_IN_TWENTY:
       return (rand_below(afl, 20) != 0);
 
@@ -2941,6 +2909,9 @@ int skip_queue_file(afl_state_t * afl, struct queue_entry * qe) {
 
     case FB_ANCILLARY:
       return (rand_below(afl, ANCILLARY_FACTOR) != 0);
+
+    case FB_ANCILLARY_ONE_IN_FIVE:
+      return (rand_below(afl, ANCILLARY_FACTOR * 5) != 0);
 
     case FB_ANCILLARY_ONE_IN_TWENTY:
       return (rand_below(afl, ANCILLARY_FACTOR * 20) != 0);

@@ -132,7 +132,38 @@ typedef enum {ANN_MIN_SINGLE, ANN_SET, ANN_MAX_SINGLE, ANN_MIN_ITER, ANN_MAX_ITE
               ANN_EDGE_COV, ANN_EDGE_MEM_COV, ANN_META_NODE, ANN_MIN_CONTEXT,
               ANN_MIN_ADDRESS, ANN_MAX_ADDRESS, ANN_OVERFLOW,
               ANN_NUMBER_OF_TYPES} annotation_type_t;
-#define NUM_FUZZ_BUCKETS 16
+
+#define CANDIDATE_GRACE_PERIOD 4
+#define USEFUL_GRACE_PERIOD 16
+#define ANCILLARY_FACTOR 2
+
+#define FUZZ_BUCKETS(X) \
+  X(FB_MIN_SINGLE) \
+  X(FB_CANDIDATE) \
+  X(FB_BASE) \
+  X(FB_ONE_IN_FIVE) \
+  X(FB_ONE_IN_TWENTY) \
+  X(FB_ONE_OF_ALL) \
+  X(FB_ANCILLARY_CANDIDATE) \
+  X(FB_ANCILLARY) \
+  X(FB_ANCILLARY_ONE_IN_FIVE) \
+  X(FB_ANCILLARY_ONE_IN_TWENTY) \
+  X(FB_ANCILLARY_ONE_OF_ALL) \
+  X(FB_UNINIT) \
+  X(MAX_FB)
+
+#define X_AS_ENUM(ENUM) ENUM,
+#define X_AS_STRING(STRING) #STRING,
+
+typedef enum {
+  FUZZ_BUCKETS(X_AS_ENUM)
+} fuzz_bucket_t;
+
+
+#define PRIORITY_FB_START FB_MIN_SINGLE
+#define PRIORITY_FB_END FB_CANDIDATE
+
+#define NUM_FUZZ_BUCKETS MAX_FB
 
 struct queue_entry;
 
@@ -997,7 +1028,7 @@ void   remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann);
 void   clean_up_annotation_queue_files(afl_state_t * afl);
 void   init_qe_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe);
 void   remove_qe_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe);
-int    calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe);
+fuzz_bucket_t calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe);
 int    skip_queue_file(afl_state_t * afl, struct queue_entry * qe);
 void   disable_annotation(afl_state_t * afl, annotation_t * ann);
 void   adjust_active_annotations(afl_state_t * afl, int);

@@ -26,6 +26,12 @@
 #include "afl-fuzz.h"
 #include <limits.h>
 
+
+static const char *fuzz_bucket_strings[] = {
+  FUZZ_BUCKETS(X_AS_STRING)
+};
+
+
 /* Update stats file for unattended monitoring. */
 
 void write_stats_file(afl_state_t *afl, double bitmap_cvg, double stability,
@@ -928,17 +934,26 @@ void show_stats(afl_state_t *afl) {
   }
 
   {
-    int length = 0;
     SAYF("\n" bV bSTOP cGRA);
     SAYF(" %-74s ", "fuzz levels:");
     SAYF(SET_G1 bSTG bV);
-    SAYF("\n" bV bSTOP cRST);
+    int length_full = 0;
+    int length_line = 0;
+    u8  tmp_full[4096];
     for (int i = 0; i < NUM_FUZZ_BUCKETS; i++) {
-      if (length > 75) { break; }
-      length+= sprintf(tmp+length, "%d ", afl->totals_fuzz_level[i]);
+      if (length_line > 40) {
+        tmp[length_line] = '\0';
+        length_full+= sprintf(tmp_full+length_full, "\n%s%s%s %-74s %s%s%s",
+                              bV, bSTOP, cRST, tmp, SET_G1, bSTG, bV);
+        length_line = 0;
+      }
+      length_line += sprintf(tmp+length_line, "%s __%d__ ",
+                             fuzz_bucket_strings[i], afl->totals_fuzz_level[i]);
     }
-    SAYF(" %-74.74s ", tmp); \
-    SAYF(SET_G1 bSTG bV); \
+    tmp[length_line] = '\0';
+    length_full+= sprintf(tmp_full+length_full, "\n%s%s%s %-74s %s%s%s",
+                          bV, bSTOP, cRST, tmp, SET_G1, bSTG, bV);
+    SAYF("%s", tmp_full);
   }
 
   {
@@ -970,7 +985,7 @@ void show_stats(afl_state_t *afl) {
     LIST_FOREACH(&afl->active_annotations, annotation_t, {
       if (el->type != ANN_EDGE_COV && el->type != ANN_EDGE_MEM_COV && el->type != ANN_SET
           && el->initialized == 1) {
-        if (i++ < 40) {
+        if (i++ < 20) {
           PRINT_ANNOTATION()
         }
       }
@@ -986,7 +1001,7 @@ void show_stats(afl_state_t *afl) {
       total++;
       if (el->type != ANN_EDGE_COV && el->type != ANN_EDGE_MEM_COV && el->type != ANN_SET
           && el->initialized == 1) {
-        if (i++ < 40) {
+        if (i++ < 20) {
           PRINT_ANNOTATION()
         }
       }
