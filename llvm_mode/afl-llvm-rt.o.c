@@ -563,7 +563,8 @@ struct BBReq {
   X(END_FUNC) \
   \
   X(START_GOAL) \
-  X(GOAL_MIN_SINGLE) X(GOAL_SET) X(GOAL_MAX_SINGLE) X(GOAL_MIN_ITER) X(GOAL_MAX_ITER) X(GOAL_OVERFLOW_ADD) \
+  X(GOAL_MIN_SINGLE) X(GOAL_SET) X(GOAL_MAX_SINGLE) X(GOAL_MIN_ITER) X(GOAL_MAX_ITER) \
+  X(GOAL_OVERFLOW_ADD) X(GOAL_OVERFLOW_SUB) \
   X(GOAL_EDGE_COV) X(GOAL_EDGE_MEM_COV) X(GOAL_META_NODE) X(GOAL_MIN_CONTEXT) \
   X(END_GOAL) \
   \
@@ -1147,6 +1148,78 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
             if (verbose) { FPRINTF_TO_ERR_FILE("over uns: a: %lu b: %lu", a, b); }
             uint64_t res, to_max, to_min;
             if (__builtin_add_overflow((uint64_t)a, (uint64_t)b, &res)) {
+              // overflowed
+              shm->result.best_values[0] = 1;
+              shm->result.best_values[2] = 1;
+              if (verbose) { FPRINTF_TO_ERR_FILE(" -> overflow\n", a, b); }
+            } else {
+              if (verbose) { FPRINTF_TO_ERR_FILE(" res: %lu", res); }
+              {
+                to_max = UINT64_MAX - res;
+                if (verbose) { FPRINTF_TO_ERR_FILE(" to max: %lu (%lu)", to_max, shm->result.best_values[1]); }
+                if (to_max < shm->result.best_values[1]) {
+                  shm->result.best_values[1] = to_max;
+                }
+              }
+              {
+                to_min = 0 + res;
+                if (verbose) { FPRINTF_TO_ERR_FILE(" to min: %lu (%lu)\n", to_min, shm->result.best_values[3]); }
+                if (to_min < shm->result.best_values[3]) {
+                  shm->result.best_values[3] = to_min;
+                }
+              }
+            }
+          }
+
+          // signed overflow/underflow
+          {
+            if (verbose) { FPRINTF_TO_ERR_FILE("over sig: a: %ld b: %ld", (int64_t)a, (int64_t)b); }
+            int64_t res;
+            if (__builtin_add_overflow((int64_t)a, (int64_t)b, &res)) {
+              shm->result.best_values[4] = 1;
+              shm->result.best_values[6] = 1;
+              if (verbose) { FPRINTF_TO_ERR_FILE(" -> overflow\n", a, b); }
+            } else {
+              if (verbose) { FPRINTF_TO_ERR_FILE(" res: %ld", res); }
+              {
+                uint64_t to_max = INT64_MAX - res;
+                if (verbose) { FPRINTF_TO_ERR_FILE(" to max: %lu (%lu)", to_max, shm->result.best_values[5]); }
+                if (to_max < shm->result.best_values[5]) {
+                  shm->result.best_values[5] = to_max;
+                }
+              }
+              {
+                uint64_t to_min = 0 - (INT64_MIN - res);
+                if (verbose) { FPRINTF_TO_ERR_FILE(" to min: %lu (%lu)\n", to_min, shm->result.best_values[7]); }
+                if (to_min < shm->result.best_values[7]) {
+                  shm->result.best_values[7] = to_min;
+                }
+              }
+            }
+          }
+
+          shm->num_writes_during_run++;
+          should_restore_bp |= 1;
+        }
+        break;
+
+      case GOAL_OVERFLOW_SUB:
+        {
+          annotation_t * annotation = action->annotation;
+          NULL_CHECK(annotation->shm_addr);
+          shm_content_t * shm = annotation->shm_addr;
+
+          uint64_t a, b;
+          BC_POP(b);
+          BC_POP(a);
+
+          if (verbose) { FPRINTF_TO_ERR_FILE("ann: %d\n", annotation->id); }
+
+          // unsigned overflow/underflow
+          {
+            if (verbose) { FPRINTF_TO_ERR_FILE("over uns: a: %lu b: %lu", a, b); }
+            uint64_t res, to_max, to_min;
+            if (__builtin_sub_overflow((uint64_t)a, (uint64_t)b, &res)) {
               // overflowed
               shm->result.best_values[0] = 1;
               shm->result.best_values[2] = 1;
