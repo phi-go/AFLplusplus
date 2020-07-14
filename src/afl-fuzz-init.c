@@ -2567,8 +2567,25 @@ static void __zmq_annotation_req(afl_state_t * afl) {
     case ANN_MIN_SINGLE:
     case ANN_MIN_ITER:
     case ANN_MIN_ADDRESS:
-    case ANN_OVERFLOW:
       memset(ann->cur_best.best_values, '\xFF', sizeof(ann->cur_best.best_values));
+      break;
+    case ANN_OVERFLOW:
+      ann->shm_addr->result.best_values[0] = 0;
+      ann->cur_best.best_values[0] = 0;
+      ann->shm_addr->result.best_values[2] = 0;
+      ann->cur_best.best_values[2] = 0;
+      ann->shm_addr->result.best_values[4] = 0;
+      ann->cur_best.best_values[4] = 0;
+      ann->shm_addr->result.best_values[6] = 0;
+      ann->cur_best.best_values[6] = 0;
+      ann->shm_addr->result.best_values[1] = UINT64_MAX;
+      ann->cur_best.best_values[1] = UINT64_MAX;
+      ann->shm_addr->result.best_values[3] = UINT64_MAX;
+      ann->cur_best.best_values[3] = UINT64_MAX;
+      ann->shm_addr->result.best_values[5] = UINT64_MAX;
+      ann->cur_best.best_values[5] = UINT64_MAX;
+      ann->shm_addr->result.best_values[7] = UINT64_MAX;
+      ann->cur_best.best_values[7] = UINT64_MAX;
       break;
     case ANN_MIN_CONTEXT:
       memset(ann->cur_best.best_values, '\xFF', sizeof(ann->cur_best.best_values));

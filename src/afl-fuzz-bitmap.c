@@ -652,73 +652,93 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
               break;
             case ANN_OVERFLOW:
               {
-                {
-                  uint64_t overflow = el->shm_addr->result.best_values[0];
-                  if (overflow) {
-                    zmq_send_annotation_update(afl, el->id, 0, 0);
-                  }
-                  uint64_t contender = el->shm_addr->result.best_values[1];
-                  if (contender < el->cur_best.best_values[1]) {
-                    if (el->cur_best.best_values[1] == UINT64_MAX) {
-                      candidate = 1;
+                if (!(el->cur_best.best_values[0]
+                      || el->cur_best.best_values[2])) {
+                  {
+                    uint64_t overflow = el->shm_addr->result.best_values[0];
+                    if (overflow) {
+                      el->shm_addr->result.best_values[0] = 1;
+                      zmq_send_annotation_update(afl, el->id, 0, 0);
+                    } else {
+                      uint64_t contender = el->shm_addr->result.best_values[1];
+                      if (contender < el->cur_best.best_values[1]) {
+                        if (el->cur_best.best_values[1] == UINT64_MAX) {
+                          candidate = 1;
+                        }
+                        el->cur_best.best_values[1] = contender;
+                        improvement += 1;
+                        ann_best_for_pos[0] = 1;
+                        if (contender <= UINT64_MAX) {
+                          ++contender;
+                        }
+                        zmq_send_annotation_update(afl, el->id, 0, contender);
+                      }
                     }
-                    el->cur_best.best_values[1] = contender;
-                    improvement += 1;
-                    ann_best_for_pos[0] = 1;
-                    zmq_send_annotation_update(afl, el->id, 0, contender+1);
+                  }
+
+                  {
+                    uint64_t overflow = el->shm_addr->result.best_values[2];
+                    if (overflow) {
+                      el->shm_addr->result.best_values[2] = 1;
+                      zmq_send_annotation_update(afl, el->id, 1, 0);
+                    } else {
+                      uint64_t contender = el->shm_addr->result.best_values[3];
+                      if (contender < el->cur_best.best_values[3]) {
+                        if (el->cur_best.best_values[3] == UINT64_MAX) {
+                          candidate = 1;
+                        }
+                        el->cur_best.best_values[3] = contender;
+                        improvement += 1;
+                        ann_best_for_pos[1] = 1;
+                        if (contender <= UINT64_MAX) {
+                          ++contender;
+                        }
+                        zmq_send_annotation_update(afl, el->id, 1, contender+1);
+                      }
+                    }
                   }
                 }
 
-                {
-                  uint64_t overflow = el->shm_addr->result.best_values[2];
-                  if (overflow) {
-                    zmq_send_annotation_update(afl, el->id, 1, 0);
-                  }
-                  uint64_t contender = el->shm_addr->result.best_values[3];
-                  if (contender < el->cur_best.best_values[3]) {
-                    if (el->cur_best.best_values[3] == UINT64_MAX) {
-                      candidate = 1;
+                if (!(el->cur_best.best_values[4]
+                      || el->cur_best.best_values[6])) {
+                  {
+                    int64_t overflow = el->shm_addr->result.best_values[4];
+                    if (overflow) {
+                      el->shm_addr->result.best_values[4] = 1;
+                      zmq_send_annotation_update(afl, el->id, 2, 0);
+                    } else {
+                      int64_t contender = el->shm_addr->result.best_values[5];
+                      int64_t cur_best = (int64_t)el->cur_best.best_values[5];
+                      if (contender < cur_best || cur_best == INT64_MIN) {
+                        if (cur_best == INT64_MIN) {
+                          candidate = 1;
+                        }
+                        el->cur_best.best_values[5] = contender;
+                        improvement += 1;
+                        ann_best_for_pos[2] = 1;
+                        zmq_send_annotation_update(afl, el->id, 2, contender+1);
+                      }
                     }
-                    el->cur_best.best_values[3] = contender;
-                    improvement += 1;
-                    ann_best_for_pos[1] = 1;
-                    zmq_send_annotation_update(afl, el->id, 1, contender+1);
                   }
-                }
 
-                {
-                  int64_t overflow = el->shm_addr->result.best_values[4];
-                  if (overflow) {
-                    zmq_send_annotation_update(afl, el->id, 2, 0);
-                  }
-                  int64_t contender = el->shm_addr->result.best_values[5];
-                  int64_t cur_best = (int64_t)el->cur_best.best_values[5];
-                  if (contender < cur_best || cur_best == INT64_MIN) {
-                    if (cur_best == INT64_MIN) {
-                      candidate = 1;
+                  {
+                    int64_t overflow = el->shm_addr->result.best_values[6];
+                    if (overflow) {
+                      el->shm_addr->result.best_values[6] = 1;
+                      zmq_send_annotation_update(afl, el->id, 3, 0);
+                    } else {
+                      int64_t contender = el->shm_addr->result.best_values[7];
+                      int64_t cur_best = (int64_t)el->cur_best.best_values[7];
+                      if (contender < cur_best || cur_best == INT64_MIN) {
+                        if (cur_best == INT64_MIN) {
+                          candidate = 1;
+                        }
+                        el->cur_best.best_values[7] = contender;
+                        improvement += 1;
+                        ann_best_for_pos[3] = 1;
+                        zmq_send_annotation_update(afl, el->id, 3, contender+1);
+                      }
                     }
-                    el->cur_best.best_values[5] = contender;
-                    improvement += 1;
-                    ann_best_for_pos[2] = 1;
-                    zmq_send_annotation_update(afl, el->id, 2, contender+1);
-                  }
-                }
-
-                {
-                  int64_t overflow = el->shm_addr->result.best_values[6];
-                  if (overflow) {
-                    zmq_send_annotation_update(afl, el->id, 3, 0);
-                  }
-                  int64_t contender = el->shm_addr->result.best_values[7];
-                  int64_t cur_best = (int64_t)el->cur_best.best_values[7];
-                  if (contender < cur_best || cur_best == INT64_MIN) {
-                    if (cur_best == INT64_MIN) {
-                      candidate = 1;
-                    }
-                    el->cur_best.best_values[7] = contender;
-                    improvement += 1;
-                    ann_best_for_pos[3] = 1;
-                    zmq_send_annotation_update(afl, el->id, 3, contender+1);
                   }
                 }
               }
