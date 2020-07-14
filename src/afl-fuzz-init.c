@@ -2745,18 +2745,23 @@ static void leave_best_min_max_annotation_queue_files(afl_state_t * afl, annotat
   ann->new_ann_queue_files = 0;
 }
 
-#define CANDIDATE_GRACE_PERIOD 8
+#define CANDIDATE_GRACE_PERIOD 4
 #define USEFUL_GRACE_PERIOD 16
+#define ANCILLARY_FACTOR 2
 
 #define FB_MIN_SINGLE 0
 #define FB_CANDIDATE 1
 #define FB_BASE 2
-#define FB_ONE_OF_ALL 3
-#define FB_ONE_IN_TWENTY 4
-#define FB_UNINIT 5
+#define FB_ONE_IN_TWENTY 3
+#define FB_ONE_OF_ALL 4
+#define FB_ANCILLARY_CANDIDATE 5
+#define FB_ANCILLARY 6
+#define FB_ANCILLARY_ONE_IN_TWENTY 7
+#define FB_ANCILLARY_ONE_OF_ALL 8
+#define FB_UNINIT 9
 
 #define PRIORITY_FB_START FB_MIN_SINGLE
-#define PRIORITY_FB_END FB_BASE
+#define PRIORITY_FB_END FB_CANDIDATE
 
 static int update_totals(afl_state_t * afl, struct queue_entry * qe, int fuzz_bucket) {
   if (qe->fuzz_bucket != fuzz_bucket) {
@@ -2778,48 +2783,103 @@ void remove_qe_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) {
 }
 
 int calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) {
-  if (qe->ann != NULL &&
-      (qe->ann->type == ANN_META_NODE || qe->ann->type == ANN_SET)) {
-    return update_totals(afl, qe, FB_ONE_OF_ALL);
-  }
+  if (qe->ann == NULL) {
 
-  if (qe->ann != NULL &&
-      (qe->ann->type == ANN_MIN_ADDRESS
-       || qe->ann->type == ANN_MAX_ADDRESS
-       || qe->ann->type == ANN_OVERFLOW)) {
-    return update_totals(afl, qe, FB_BASE);
-  }
+    if (qe->fuzz_level <= CANDIDATE_GRACE_PERIOD) {
+      return update_totals(afl, qe, FB_CANDIDATE);
 
-  // this annotation has shown to be useful, finish those before others
-  if (qe->ann != NULL &&
-      (qe->ann->type == ANN_MIN_SINGLE || qe->ann->type == ANN_MIN_CONTEXT)
-      && qe->ann->times_improved > 1) {
-    if (qe->fuzz_level <= USEFUL_GRACE_PERIOD) {
-      return update_totals(afl, qe, FB_MIN_SINGLE);
     } else {
       return update_totals(afl, qe, FB_BASE);
     }
   }
 
-  if (qe->fuzz_level <= CANDIDATE_GRACE_PERIOD) {
-    return update_totals(afl, qe, FB_CANDIDATE);
-  }
 
-  // normal queue entry
-  if (qe->ann == NULL) {
-    return update_totals(afl, qe, FB_BASE);
-  }
+  switch(qe->ann->type) {
 
-  // candidates are more interesting until we gave them enough time
-  if (qe->ann_candidate) {
-    if (qe->fuzz_level <= CANDIDATE_GRACE_PERIOD) {
-      return update_totals(afl, qe, FB_CANDIDATE);
-    } else {
-      // candidates have 1 in 20 chance to get fuzzed, many annotations can never get better
-      // after their initial value, this is to limit their impact on performance
+    case ANN_MIN_SINGLE:
+
+      if (qe->ann_candidate) {
+
+        if (qe->fuzz_level <= CANDIDATE_GRACE_PERIOD) {
+          return update_totals(afl, qe, FB_CANDIDATE);
+
+        } else {
+          return update_totals(afl, qe, FB_ONE_IN_TWENTY);
+        }
+
+
+      } else {
+
+        if (qe->fuzz_level <= USEFUL_GRACE_PERIOD) {
+          return update_totals(afl, qe, FB_MIN_SINGLE);
+
+        } else {
+          return update_totals(afl, qe, FB_BASE);
+        }
+      }
+
+
+    case ANN_MIN_ITER:
+    case ANN_MAX_ITER:
+    case ANN_MIN_CONTEXT:
+
+      if (qe->fuzz_level <= CANDIDATE_GRACE_PERIOD) {
+        return update_totals(afl, qe, FB_MIN_SINGLE);
+
+      } else if (qe->ann_candidate) {
+        return update_totals(afl, qe, FB_ONE_IN_TWENTY);
+
+      } else {
+        return update_totals(afl, qe, FB_BASE);
+      }
+
+
+    case ANN_META_NODE:
+
+      if (qe->fuzz_level == 0) {
+        return update_totals(afl, qe, FB_CANDIDATE);
+
+      } else {
+        return update_totals(afl, qe, FB_ONE_OF_ALL);
+      }
+
+
+    case ANN_OVERFLOW:
+    case ANN_MIN_ADDRESS:
+    case ANN_MAX_ADDRESS:
+    case ANN_MAX_SINGLE:
+
+      if (qe->ann_candidate && qe->fuzz_level == 0) {
+        return update_totals(afl, qe, FB_ANCILLARY_CANDIDATE);
+
+      } else if (qe->ann_candidate && qe->fuzz_level > CANDIDATE_GRACE_PERIOD) {
+        return update_totals(afl, qe, FB_ANCILLARY_ONE_IN_TWENTY);
+
+      } else {
+        return update_totals(afl, qe, FB_ANCILLARY);
+      }
+
+
+    case ANN_SET:
+
+      if (qe->fuzz_level == 0) {
+        return update_totals(afl, qe, FB_ANCILLARY_CANDIDATE);
+
+      } else {
+        return update_totals(afl, qe, FB_ANCILLARY_ONE_OF_ALL);
+      }
+
+
+    case ANN_EDGE_COV:
+    case ANN_EDGE_MEM_COV:
+      WARNF("these annotations should not have queue files");
       return update_totals(afl, qe, FB_ONE_IN_TWENTY);
-    }
+
+
+    default:
+      FATAL("Unknown annotation type %d", qe->ann->type);
   }
+
 
   WARNF("Did not consider this qe constellation.");
   return update_totals(afl, qe, FB_BASE);
@@ -2845,26 +2905,57 @@ int skip_queue_file(afl_state_t * afl, struct queue_entry * qe) {
   // }
 
   // skip if higher priority queue entries are available
-  int qe_fuzz_bucket = calculate_fuzz_bucket(afl, qe);
-  for (int i = PRIORITY_FB_START; i < PRIORITY_FB_END; i++) {
+  int fb = calculate_fuzz_bucket(afl, qe);
+
+  for (int i = PRIORITY_FB_START; i <= PRIORITY_FB_END; i++) {
     if (afl->totals_fuzz_level[i] > 0) {
-      if (qe_fuzz_bucket > i) {
+      if (fb > i) {
         return 1;
       } else {
-        break;
+        return 0;
       }
     }
   }
 
-  if (qe_fuzz_bucket == FB_ONE_OF_ALL) {
-    return (rand_below(afl, qe->ann->num_corresponding_queue_files) != 0);
+  switch(fb) {
+
+    case FB_MIN_SINGLE:
+      WARNF("this should not be reached\n");
+      return 0;
+
+    case FB_CANDIDATE:
+      WARNF("this should not be reached\n");
+      return 0;
+
+    case FB_BASE:
+      return 0;
+
+    case FB_ONE_IN_TWENTY:
+      return (rand_below(afl, 20) != 0);
+
+    case FB_ONE_OF_ALL:
+      return (rand_below(afl, qe->ann->num_corresponding_queue_files) != 0);
+
+    case FB_ANCILLARY_CANDIDATE:
+      return 0;
+
+    case FB_ANCILLARY:
+      return (rand_below(afl, ANCILLARY_FACTOR) != 0);
+
+    case FB_ANCILLARY_ONE_IN_TWENTY:
+      return (rand_below(afl, ANCILLARY_FACTOR * 20) != 0);
+
+    case FB_ANCILLARY_ONE_OF_ALL:
+      return (rand_below(afl, ANCILLARY_FACTOR * qe->ann->num_corresponding_queue_files) != 0);
+
+    case FB_UNINIT:
+      WARNF("this should not be reached\n");
+      return 1;
+
+    default:
+      FATAL("unhandled case %d", fb);
   }
 
-  if (qe_fuzz_bucket == FB_ONE_IN_TWENTY) {
-    return (rand_below(afl, 20) != 0);
-  }
-
-  return 0;
 }
 
 void clean_up_annotation_queue_files(afl_state_t * afl) {
