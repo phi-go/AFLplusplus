@@ -2529,6 +2529,7 @@ abandon_entry:
   }
 
   munmap(orig_in, afl->queue_cur->len);
+  calculate_fuzz_bucket(afl, afl->queue_cur);
   zmq_send_exec_update(afl, afl->queue_cur, new_execs);
   return ret_val;
 
