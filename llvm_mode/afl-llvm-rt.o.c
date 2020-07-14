@@ -1247,7 +1247,7 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
           {
             if (verbose) { FPRINTF_TO_ERR_FILE("over sig: a: %ld b: %ld", (int64_t)a, (int64_t)b); }
             int64_t res;
-            if (__builtin_add_overflow((int64_t)a, (int64_t)b, &res)) {
+            if (__builtin_sub_overflow((int64_t)a, (int64_t)b, &res)) {
               shm->result.best_values[4] = 1;
               shm->result.best_values[6] = 1;
               if (verbose) { FPRINTF_TO_ERR_FILE(" -> overflow\n", a, b); }
