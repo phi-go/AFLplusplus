@@ -2725,32 +2725,32 @@ static void leave_best_min_max_annotation_queue_files(afl_state_t * afl, annotat
       for (int i = 0; i < until; i++) {
         if (el->ann_best_for_pos[i]) {
 
-          switch(ann->type) {
-            case ANN_MIN_SINGLE:
-            case ANN_MIN_ITER:
-            case ANN_MIN_CONTEXT:
-            case ANN_MIN_ADDRESS:
-            case ANN_OVERFLOW:
-              // if (ann->cur_best.best_values[i] == 0) {
-              //   // best possible so no longer interesting
-              //   continue;
-              // }
-              break;
-            case ANN_MAX_SINGLE:
-            case ANN_MAX_ITER:
-            case ANN_MAX_ADDRESS:
-              if (ann->cur_best.best_values[i] == UINT64_MAX) {
-                // best possible so no longer interesting
-                continue;
-              }
-              break;
-          default:
-            FATAL("Unexpected annotation type %d", ann->type);
-          }
+          // switch(ann->type) {
+          //   case ANN_MIN_SINGLE:
+          //   case ANN_MIN_ITER:
+          //   case ANN_MIN_CONTEXT:
+          //   case ANN_MIN_ADDRESS:
+          //   case ANN_OVERFLOW:
+          //     // if (ann->cur_best.best_values[i] == 0) {
+          //     //   // best possible so no longer interesting
+          //     //   continue;
+          //     // }
+          //     break;
+          //   case ANN_MAX_SINGLE:
+          //   case ANN_MAX_ITER:
+          //   case ANN_MAX_ADDRESS:
+          //     if (ann->cur_best.best_values[i] == UINT64_MAX) {
+          //       // best possible so no longer interesting
+          //       continue;
+          //     }
+          //     break;
+          // default:
+          //   FATAL("Unexpected annotation type %d", ann->type);
+          // }
 
-        // still interesting keep
-        remove = 0;
-        break;
+          // still interesting keep
+          remove = 0;
+          break;
         }
       }
       if (remove) {
