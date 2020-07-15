@@ -2731,10 +2731,10 @@ static void leave_best_min_max_annotation_queue_files(afl_state_t * afl, annotat
             case ANN_MIN_CONTEXT:
             case ANN_MIN_ADDRESS:
             case ANN_OVERFLOW:
-              if (ann->cur_best.best_values[i] == 0) {
-                // best possible so no longer interesting
-                continue;
-              }
+              // if (ann->cur_best.best_values[i] == 0) {
+              //   // best possible so no longer interesting
+              //   continue;
+              // }
               break;
             case ANN_MAX_SINGLE:
             case ANN_MAX_ITER:

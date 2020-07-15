@@ -1242,8 +1242,8 @@ int main(int argc, char **argv_orig, char **envp) {
 
     u8 skipped_fuzz;
 
-    exchange_new_queue_files(afl);
     clean_up_annotation_queue_files(afl);
+    exchange_new_queue_files(afl);
     zmq_handle_commands(afl);
 
     cull_queue(afl);
