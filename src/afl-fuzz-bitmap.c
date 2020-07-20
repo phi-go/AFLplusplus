@@ -863,7 +863,15 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
               LIST_REMOVE_CURRENT_EL_IN_FOREACH();
             }
 
-            // some annotations can create an unbounded amount of queue files
+            // some annotations can create so many new queue files during a single fuzz attempt
+            // that memory becomes an issue, disable them for the current attempt if that is the case
+            if (el->new_ann_queue_files > 10) {
+              disable_annotation(afl, el);
+              LIST_REMOVE_CURRENT_EL_IN_FOREACH();
+            }
+
+
+            // some annotations can create an large amount of queue files
             // ignore them if their number gets too large
             if ((el->type == ANN_SET && el->num_corresponding_queue_files > 1024) 
                 || (el->type == ANN_META_NODE && el->num_corresponding_queue_files > 1024)) {
