@@ -935,7 +935,7 @@ void show_stats(afl_state_t *afl) {
 
   {
     SAYF("\n" bV bSTOP cGRA);
-    SAYF(" %-74s ", "fuzz levels:");
+    SAYF(" %s %-40s %-16s ", "cur fuzz bucket:", fuzz_bucket_strings[afl->queue_cur->fuzz_bucket], "fuzz levels:");
     SAYF(SET_G1 bSTG bV);
     int length_full = 0;
     int length_line = 0;

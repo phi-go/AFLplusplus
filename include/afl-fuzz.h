@@ -133,14 +133,17 @@ typedef enum {ANN_MIN_SINGLE, ANN_SET, ANN_MAX_SINGLE, ANN_MIN_ITER, ANN_MAX_ITE
               ANN_MIN_ADDRESS, ANN_MAX_ADDRESS, ANN_OVERFLOW,
               ANN_NUMBER_OF_TYPES} annotation_type_t;
 
-#define CANDIDATE_GRACE_PERIOD 4
+#define CANDIDATE_GRACE_PERIOD 1
 #define USEFUL_GRACE_PERIOD 16
 #define ANCILLARY_FACTOR 2
+#define CANDIDATE_FB_FACTOR 10
 
 #define FUZZ_BUCKETS(X) \
+  X(FB_FAVORED) \
   X(FB_MIN_SINGLE) \
   X(FB_CANDIDATE) \
   X(FB_BASE) \
+  X(FB_ONE_IN_TWO) \
   X(FB_ONE_IN_FIVE) \
   X(FB_ONE_IN_TWENTY) \
   X(FB_ONE_OF_ALL) \
@@ -160,8 +163,8 @@ typedef enum {
 } fuzz_bucket_t;
 
 
-#define PRIORITY_FB_START FB_MIN_SINGLE
-#define PRIORITY_FB_END FB_CANDIDATE
+#define PRIORITY_FB_START FB_FAVORED
+#define PRIORITY_FB_END FB_MIN_SINGLE
 
 #define NUM_FUZZ_BUCKETS MAX_FB
 
@@ -198,6 +201,7 @@ struct queue_entry {
       has_new_cov,                      /* Triggers new coverage?           */
       var_behavior,                     /* Variable behavior?               */
       favored,                          /* Currently favored?               */
+      was_favored,                      /* Was previously favored?          */
       fs_redundant,                     /* Marked as redundant in the fs?   */
       fully_colorized;                  /* Do not run redqueen stage again  */
 
@@ -1031,6 +1035,7 @@ void   save_cmdline(afl_state_t *, u32, char **);
 void   connect_zmq(afl_state_t *);
 void   disconnect_zmq(afl_state_t *);
 void   zmq_send_file_path(afl_state_t *, struct queue_entry * qe);
+void   zmq_fuzz_bucket_update(afl_state_t * afl, fuzz_bucket_t less_pos, fuzz_bucket_t more_pos);
 void   zmq_send_queue_entry_removal(afl_state_t * afl, struct queue_entry * qe);
 void   zmq_send_exec_update(afl_state_t *, struct queue_entry *, u64);
 void   zmq_send_annotation_update(afl_state_t *, int ann_id, u64 pos, u64 new_best);

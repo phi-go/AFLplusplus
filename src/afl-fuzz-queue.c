@@ -501,6 +501,9 @@ void cull_queue(afl_state_t *afl) {
 
         ++afl->pending_favored;
 
+        calculate_fuzz_bucket(afl, afl->top_rated[i]);
+
+
       }
 
     }
@@ -510,6 +513,16 @@ void cull_queue(afl_state_t *afl) {
   q = afl->queue;
 
   while (q) {
+
+    if (q->was_favored && !q->favored) {
+      calculate_fuzz_bucket(afl, q);
+    }
+
+    q->was_favored = 0;
+
+    if (q->favored) {
+      q->was_favored = 1;
+    }
 
     mark_as_redundant(afl, q, !q->favored);
     q = q->next;

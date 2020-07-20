@@ -2543,6 +2543,19 @@ static int __zmq_bb_req(afl_state_t * afl) {
   return 1;
 }
 
+void zmq_fuzz_bucket_update(afl_state_t * afl, fuzz_bucket_t less_pos, fuzz_bucket_t more_pos) {
+  if (afl->zmq_socket) {
+    zmq_maybe_wait_for_credit(afl);
+    z_send("F_FB", 4, ZMQ_SNDMORE);
+    z_send(&less_pos, sizeof(less_pos), ZMQ_SNDMORE);
+    z_send(&more_pos, sizeof(more_pos), 0);
+#ifdef CREDIT_DEBUG
+    SAYF("fuzz bucket update %d\n", afl->zmq_credit);
+#endif
+    zmq_dec_credit(afl);
+  }
+}
+
 #define MAX_INSTRUCTION_SIZE 16
 
 static int __zmq_annotation_req(afl_state_t * afl) {
@@ -2764,17 +2777,15 @@ static void leave_best_min_max_annotation_queue_files(afl_state_t * afl, annotat
           //   case ANN_MIN_CONTEXT:
           //   case ANN_MIN_ADDRESS:
           //   case ANN_OVERFLOW:
-          //     // if (ann->cur_best.best_values[i] == 0) {
-          //     //   // best possible so no longer interesting
-          //     //   continue;
-          //     // }
+          //     if (ann->cur_best.best_values[i] == 0) {
+          //       el->ann_candidate = 1;
+          //     }
           //     break;
           //   case ANN_MAX_SINGLE:
           //   case ANN_MAX_ITER:
           //   case ANN_MAX_ADDRESS:
           //     if (ann->cur_best.best_values[i] == UINT64_MAX) {
-          //       // best possible so no longer interesting
-          //       continue;
+          //       el->ann_candidate = 1;
           //     }
           //     break;
           // default:
@@ -2797,6 +2808,7 @@ static void leave_best_min_max_annotation_queue_files(afl_state_t * afl, annotat
 
 static fuzz_bucket_t update_totals(afl_state_t * afl, struct queue_entry * qe, int fuzz_bucket) {
   if (qe->fuzz_bucket != fuzz_bucket) {
+    zmq_fuzz_bucket_update(afl, qe->fuzz_bucket, fuzz_bucket);
     --afl->totals_fuzz_level[qe->fuzz_bucket];
     ++afl->totals_fuzz_level[fuzz_bucket];
     qe->fuzz_bucket = fuzz_bucket;
@@ -2812,16 +2824,28 @@ void init_qe_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) {
 
 void remove_qe_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) {
   --afl->totals_fuzz_level[qe->fuzz_bucket];
+  zmq_fuzz_bucket_update(afl, qe->fuzz_bucket, FB_UNINIT);
 }
 
 fuzz_bucket_t calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) {
+  if (qe->favored) {
+    if (qe->was_fuzzed == 0 && qe->fuzz_level == 0) {
+      return update_totals(afl, qe, FB_FAVORED);
+    } else if (qe->fuzz_level <= USEFUL_GRACE_PERIOD) {
+      return update_totals(afl, qe, FB_CANDIDATE);
+    } else {
+      return update_totals(afl, qe, FB_BASE);
+    }
+  }
+
+
   if (qe->ann == NULL) {
 
     if (qe->fuzz_level <= CANDIDATE_GRACE_PERIOD) {
       return update_totals(afl, qe, FB_CANDIDATE);
 
     } else {
-      return update_totals(afl, qe, FB_BASE);
+      return update_totals(afl, qe, FB_ONE_IN_TWO);
     }
   }
 
@@ -2832,11 +2856,11 @@ fuzz_bucket_t calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) 
 
       if (qe->ann_candidate) {
 
-        if (qe->fuzz_level <= CANDIDATE_GRACE_PERIOD) {
+        if (qe->fuzz_level <= USEFUL_GRACE_PERIOD) {
           return update_totals(afl, qe, FB_CANDIDATE);
 
         } else {
-          return update_totals(afl, qe, FB_ONE_IN_TWENTY);
+          return update_totals(afl, qe, FB_BASE);
         }
 
 
@@ -2855,11 +2879,11 @@ fuzz_bucket_t calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) 
     case ANN_MAX_ITER:
     case ANN_MIN_CONTEXT:
 
-      if (qe->fuzz_level <= CANDIDATE_GRACE_PERIOD) {
+      if (qe->fuzz_level <= USEFUL_GRACE_PERIOD) {
         return update_totals(afl, qe, FB_MIN_SINGLE);
 
       } else if (qe->ann_candidate) {
-        return update_totals(afl, qe, FB_ONE_IN_TWENTY);
+        return update_totals(afl, qe, FB_BASE);
 
       } else {
         return update_totals(afl, qe, FB_BASE);
@@ -2932,42 +2956,58 @@ int skip_queue_file(afl_state_t * afl, struct queue_entry * qe) {
     }
   }
 
+  int candidate_factor;
+  if (afl->totals_fuzz_level[FB_CANDIDATE] > 0) {
+    candidate_factor = CANDIDATE_FB_FACTOR;
+  } else {
+    candidate_factor = 1;
+  }
+
   switch(fb) {
+
+    case FB_FAVORED:
+      WARNF("this should not be reached\n");
+      return 0;
 
     case FB_MIN_SINGLE:
       WARNF("this should not be reached\n");
       return 0;
 
     case FB_CANDIDATE:
-      WARNF("this should not be reached\n");
       return 0;
 
     case FB_BASE:
-      return 0;
+      return (rand_below(afl, candidate_factor) != 0);
+
+    case FB_ONE_IN_TWO:
+      return (rand_below(afl, 2 * candidate_factor) != 0);
 
     case FB_ONE_IN_FIVE:
-      return (rand_below(afl, 5) != 0);
+      return (rand_below(afl, 5 * candidate_factor) != 0);
 
     case FB_ONE_IN_TWENTY:
-      return (rand_below(afl, 20) != 0);
+      return (rand_below(afl, 20 * candidate_factor) != 0);
 
     case FB_ONE_OF_ALL:
-      return (rand_below(afl, qe->ann->num_corresponding_queue_files) != 0);
+      return (rand_below(afl, qe->ann->num_corresponding_queue_files
+                              * candidate_factor) != 0);
 
     case FB_ANCILLARY_CANDIDATE:
       return 0;
 
     case FB_ANCILLARY:
-      return (rand_below(afl, ANCILLARY_FACTOR) != 0);
+      return (rand_below(afl, ANCILLARY_FACTOR * candidate_factor) != 0);
 
     case FB_ANCILLARY_ONE_IN_FIVE:
-      return (rand_below(afl, ANCILLARY_FACTOR * 5) != 0);
+      return (rand_below(afl, ANCILLARY_FACTOR * 5 * candidate_factor) != 0);
 
     case FB_ANCILLARY_ONE_IN_TWENTY:
-      return (rand_below(afl, ANCILLARY_FACTOR * 20) != 0);
+      return (rand_below(afl, ANCILLARY_FACTOR * 20 * candidate_factor) != 0);
 
     case FB_ANCILLARY_ONE_OF_ALL:
-      return (rand_below(afl, ANCILLARY_FACTOR * qe->ann->num_corresponding_queue_files) != 0);
+      return (rand_below(afl, ANCILLARY_FACTOR
+                              * qe->ann->num_corresponding_queue_files
+                              * candidate_factor) != 0);
 
     case FB_UNINIT:
       WARNF("this should not be reached\n");
