@@ -2368,8 +2368,17 @@ void connect_zmq(afl_state_t * afl) {
     zmq_send(afl->zmq_socket, "F_UP", strlen("F_UP"), 0);
     zmq_send(afl->zmq_socket_credit, "FCUP", strlen("FCUP"), 0);
     afl->zmq_credit = MAX_ZMQ_CREDIT;
-    OKF("Connected to ZMQ as '%s' (credit: %d)", zmq_id, afl->zmq_credit);
+    OKF("Connecting to ZMQ as '%s' (credit: %d)", zmq_id, afl->zmq_credit);
   }
+
+  u8 response[4] = {0};
+  if (zmq_recv(afl->zmq_socket, &response, sizeof(response), 0) == -1) {
+    FATAL("ZMQ recv error: %s in %s:%d\n", zmq_strerror(errno), __FILE__, __LINE__);
+  }
+  if (strncmp(response, "OKGO", 4) != 0) {
+    FATAL("Unexpected startup message %s\n", response);
+  }
+  OKF("Connected to ZMQ as '%s'", zmq_id);
 }
 
 void disconnect_zmq(afl_state_t * afl) {
