@@ -701,6 +701,7 @@ static void remove_breakpoint(action_t * action, int quiet) {
 #define REGISTER_16BIT(val) (val & 0xFFFF)
 #define REGISTER_EXTENDED(val) (val & 0xFFFFFFFF)
 
+#if defined(__x86_64__) || defined(__aarch64__)
 #define CLASSIC_REGISTER_CASES(NAME) \
   case R##NAME##X: \
     return ctx->uc_mcontext.gregs[REG_R##NAME##X]; \
@@ -712,7 +713,21 @@ static void remove_breakpoint(action_t * action, int quiet) {
     return REGISTER_HIGHER(ctx->uc_mcontext.gregs[REG_R##NAME##X]); \
   case NAME##L: \
     return REGISTER_LOWER(ctx->uc_mcontext.gregs[REG_R##NAME##X]);
+#else
+#define CLASSIC_REGISTER_CASES(NAME) \
+  case R##NAME##X: \
+    return ctx->uc_mcontext.gregs[REG_E##NAME##X]; \
+  case E##NAME##X: \
+    return REGISTER_EXTENDED(ctx->uc_mcontext.gregs[REG_E##NAME##X]); \
+  case NAME##X: \
+    return REGISTER_16BIT(ctx->uc_mcontext.gregs[REG_E##NAME##X]); \
+  case NAME##H: \
+    return REGISTER_HIGHER(ctx->uc_mcontext.gregs[REG_E##NAME##X]); \
+  case NAME##L: \
+    return REGISTER_LOWER(ctx->uc_mcontext.gregs[REG_E##NAME##X]);
+#endif
 
+#if defined(__x86_64__) || defined(__aarch64__)
 #define SOURCE_DEST_REGISTER_CASES(NAME) \
   case R##NAME##I: \
     return ctx->uc_mcontext.gregs[REG_R##NAME##I]; \
@@ -722,7 +737,19 @@ static void remove_breakpoint(action_t * action, int quiet) {
     return REGISTER_16BIT(ctx->uc_mcontext.gregs[REG_R##NAME##I]); \
   case NAME##IL: \
     return REGISTER_LOWER(ctx->uc_mcontext.gregs[REG_R##NAME##I]);
+#else
+#define SOURCE_DEST_REGISTER_CASES(NAME) \
+  case R##NAME##I: \
+    return ctx->uc_mcontext.gregs[REG_E##NAME##I]; \
+  case E##NAME##I: \
+    return REGISTER_EXTENDED(ctx->uc_mcontext.gregs[REG_E##NAME##I]); \
+  case NAME##I: \
+    return REGISTER_16BIT(ctx->uc_mcontext.gregs[REG_E##NAME##I]); \
+  case NAME##IL: \
+    return REGISTER_LOWER(ctx->uc_mcontext.gregs[REG_E##NAME##I]);
+#endif
 
+#if defined(__x86_64__) || defined(__aarch64__)
 #define P_REGISTER_CASES(NAME) \
   case R##NAME##P: \
     return ctx->uc_mcontext.gregs[REG_R##NAME##P]; \
@@ -732,7 +759,19 @@ static void remove_breakpoint(action_t * action, int quiet) {
     return REGISTER_16BIT(ctx->uc_mcontext.gregs[REG_R##NAME##P]); \
   case NAME##PL: \
     return REGISTER_LOWER(ctx->uc_mcontext.gregs[REG_R##NAME##P]);
+#else
+#define P_REGISTER_CASES(NAME) \
+  case R##NAME##P: \
+    return ctx->uc_mcontext.gregs[REG_E##NAME##P]; \
+  case E##NAME##P: \
+    return REGISTER_EXTENDED(ctx->uc_mcontext.gregs[REG_E##NAME##P]); \
+  case NAME##P: \
+    return REGISTER_16BIT(ctx->uc_mcontext.gregs[REG_E##NAME##P]); \
+  case NAME##PL: \
+    return REGISTER_LOWER(ctx->uc_mcontext.gregs[REG_E##NAME##P]);
+#endif
 
+#if defined(__x86_64__) || defined(__aarch64__)
 #define P_WITHOUT_L_REGISTER_CASES(NAME) \
   case R##NAME##P: \
     return ctx->uc_mcontext.gregs[REG_R##NAME##P]; \
@@ -740,7 +779,17 @@ static void remove_breakpoint(action_t * action, int quiet) {
     return REGISTER_EXTENDED(ctx->uc_mcontext.gregs[REG_R##NAME##P]); \
   case NAME##P: \
     return REGISTER_16BIT(ctx->uc_mcontext.gregs[REG_R##NAME##P]);
+#else
+#define P_WITHOUT_L_REGISTER_CASES(NAME) \
+  case R##NAME##P: \
+    return ctx->uc_mcontext.gregs[REG_E##NAME##P]; \
+  case E##NAME##P: \
+    return REGISTER_EXTENDED(ctx->uc_mcontext.gregs[REG_E##NAME##P]); \
+  case NAME##P: \
+    return REGISTER_16BIT(ctx->uc_mcontext.gregs[REG_E##NAME##P]);
+#endif
 
+#if defined(__x86_64__) || defined(__aarch64__)
 #define NEW_REGISTER_CASES(NAME) \
   case R##NAME: \
     return ctx->uc_mcontext.gregs[REG_R##NAME]; \
@@ -750,6 +799,7 @@ static void remove_breakpoint(action_t * action, int quiet) {
     return REGISTER_16BIT(ctx->uc_mcontext.gregs[REG_R##NAME]); \
   case R##NAME##B: \
     return REGISTER_LOWER(ctx->uc_mcontext.gregs[REG_R##NAME]);
+#endif
 
 #define BC_MAX_STACK 64
 
@@ -808,6 +858,7 @@ static uint64_t bc_get_reg(annotation_byte_code_t reg, ucontext_t * ctx, int all
     CLASSIC_REGISTER_CASES(D);
     SOURCE_DEST_REGISTER_CASES(S);
     SOURCE_DEST_REGISTER_CASES(D);
+#if defined(__x86_64__) || defined(__aarch64__)
     NEW_REGISTER_CASES(8);
     NEW_REGISTER_CASES(9);
     NEW_REGISTER_CASES(10);
@@ -816,15 +867,18 @@ static uint64_t bc_get_reg(annotation_byte_code_t reg, ucontext_t * ctx, int all
     NEW_REGISTER_CASES(13);
     NEW_REGISTER_CASES(14);
     NEW_REGISTER_CASES(15);
+#endif
     P_REGISTER_CASES(B);
     P_REGISTER_CASES(S);
     P_WITHOUT_L_REGISTER_CASES(I);
+#if defined(__x86_64__) || defined(__aarch64__)
     case CS:
       return  ctx->uc_mcontext.gregs[REG_CSGSFS]        & 0xFFFF;
     case FS:
       return (ctx->uc_mcontext.gregs[REG_CSGSFS] >> 16) & 0xFFFF;
     case GS:
       return (ctx->uc_mcontext.gregs[REG_CSGSFS] >> 32) & 0xFFFF;
+#endif
     default:
       FPRINTF_TO_ERR_FILE("ERROR unhandled reg: %s(%d)\n", bc_str(reg), reg);
       raise(SIGSTOP);
@@ -1036,7 +1090,7 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
         {
           int64_t val;
           BC_POP(val);
-          val = labs(val);
+          val = llabs(val);
           BC_PUSH(val);
         }
         break;
@@ -1372,6 +1426,12 @@ static void exec_annotation(annotation_byte_code_t * byte_code, int byte_code_le
   }
 }
 
+#if defined(__x86_64__) || defined(__aarch64__)
+  #define IP_REG REG_RIP
+#else
+  #define IP_REG REG_EIP
+#endif
+
 static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
 {
   assert(signo == SIGTRAP);
@@ -1380,7 +1440,7 @@ static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
     // we only expect to land here if we set a bp, a bp (0xcc / int 3) is one byte long
     // and instructions are completed before we get to the signal handler
     // so subtract one from our position
-    uint8_t * pos = (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP] - 1;
+    uint8_t * pos = (uint8_t *)ctx->uc_mcontext.gregs[IP_REG] - 1;
 
     should_restore_bp = 0;
 
@@ -1407,7 +1467,7 @@ static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
 
       // set RIP so that instruction is repeated
       // TODO displaced stepping or emulate instruction -> to make this thread safe
-      ctx->uc_mcontext.gregs[REG_RIP] -= 1;
+      ctx->uc_mcontext.gregs[IP_REG] -= 1;
 
       remove_breakpoint(act, /*quiet*/ 1);
     } else {
@@ -1438,7 +1498,7 @@ static void sigtrap_handler(int signo, siginfo_t *si, void* arg)
     single_step_start_pos = NULL;
 
     if (edge_cov_action != NULL) {
-      uint8_t * pos = (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP];
+      uint8_t * pos = (uint8_t *)ctx->uc_mcontext.gregs[IP_REG];
       if (edge_cov_target == 0) {
         annotation_t * annotation = edge_cov_action->annotation;
         NULL_CHECK(annotation->shm_addr);
@@ -1476,7 +1536,7 @@ void backtrace_handler(int sig, siginfo_t *si, void* arg) {
   }
 
   ucontext_t *ctx = (ucontext_t *)arg;
-  uint8_t * pos = (uint8_t *)ctx->uc_mcontext.gregs[REG_RIP] - 16;
+  uint8_t * pos = (uint8_t *)ctx->uc_mcontext.gregs[IP_REG] - 16;
 
   FPRINTF_TO_ERR_FILE("\ncode around %p: ", pos+16);
   int i;
@@ -1490,6 +1550,8 @@ void backtrace_handler(int sig, siginfo_t *si, void* arg) {
   raise(SIGSTOP);
   return;
 }
+
+#undef IP_REG
 
 static void print_annotations() {
   annotation_t * an;
@@ -2015,7 +2077,7 @@ static void __afl_start_forkserver(void) {
     }
 
     if (WIFCONTINUED(status)) {
-      FPRINTF_TO_ERR_FILE("PUT continued: %d\n");
+      FPRINTF_TO_ERR_FILE("PUT continued\n");
     }
 
     /* Relay wait status to pipe, then loop back. */
