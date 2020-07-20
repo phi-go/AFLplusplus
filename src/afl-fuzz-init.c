@@ -2754,6 +2754,7 @@ static int __zmq_add_queue_exchange_request(afl_state_t * afl) {
 
   list_append(&afl->queue_exchange_requests, req);
 
+  return 0;
 }
 
 void remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann) {
@@ -2902,7 +2903,7 @@ fuzz_bucket_t calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) 
     case ANN_META_NODE:
 
       if (qe->fuzz_level == 0) {
-        return update_totals(afl, qe, FB_ONE_IN_FIVE);
+        return update_totals(afl, qe, FB_CANDIDATE);
 
       } else {
         return update_totals(afl, qe, FB_ONE_OF_ALL);
