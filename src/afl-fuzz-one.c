@@ -426,7 +426,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
 #endif                                                     /* ^IGNORE_FINDS */
 
-  adjust_active_annotations(afl, 0);
+  adjust_active_annotations(afl, 0, 0, -1);
 
   // if (unlikely(afl->not_on_tty)) {
 

@@ -2514,7 +2514,7 @@ struct BBReq {
 
 #define MAX_BB_SIZE 4096
 
-static void __zmq_bb_req(afl_state_t * afl) {
+static int __zmq_bb_req(afl_state_t * afl) {
   char bb_content [MAX_BB_SIZE];
   struct BBReq req;
   Z_READ(&req.pos, sizeof(req.pos));
@@ -2540,11 +2540,12 @@ static void __zmq_bb_req(afl_state_t * afl) {
   SAYF("ann bb resp %d\n", afl->zmq_credit);
 #endif
   zmq_dec_credit(afl);
+  return 1;
 }
 
 #define MAX_INSTRUCTION_SIZE 16
 
-static void __zmq_annotation_req(afl_state_t * afl) {
+static int __zmq_annotation_req(afl_state_t * afl) {
   annotation_t * ann = calloc(1, sizeof(*ann));
   if (ann == NULL) {
     FATAL("failed to allocated bb_annotation %s:%d", __FILE__, __LINE__);
@@ -2586,6 +2587,7 @@ static void __zmq_annotation_req(afl_state_t * afl) {
       ann->cur_best.best_values[5] = UINT64_MAX;
       ann->shm_addr->result.best_values[7] = UINT64_MAX;
       ann->cur_best.best_values[7] = UINT64_MAX;
+      ann->max_pos = 8;
       break;
     case ANN_MIN_CONTEXT:
       memset(ann->cur_best.best_values, '\xFF', sizeof(ann->cur_best.best_values));
@@ -2612,6 +2614,7 @@ static void __zmq_annotation_req(afl_state_t * afl) {
       FATAL("Unknown annotation type %d", ann->type);
   }
   list_append(&afl->all_annotations, ann);
+  afl->has_fresh_annotations = 1;
 
   char cmd[4] = "EANR";
   write_to_command_pipe(&cmd, 4);
@@ -2656,9 +2659,10 @@ static void __zmq_annotation_req(afl_state_t * afl) {
   SAYF("ann enable ann %d\n", afl->zmq_credit);
 #endif
   zmq_dec_credit(afl);
+  return 1;
 }
 
-static void __zmq_add_action_req(afl_state_t * afl) {
+static int __zmq_add_action_req(afl_state_t * afl) {
   int ann_id;
   Z_READ(&ann_id, sizeof(ann_id));
 
@@ -2699,6 +2703,35 @@ static void __zmq_add_action_req(afl_state_t * afl) {
   SAYF("ann enable ann %d\n", afl->zmq_credit);
 #endif
   zmq_dec_credit(afl);
+  return 1;
+}
+
+static void zmq_queue_exchange_response(afl_state_t * afl, struct queue_exchange_req * req) {
+  zmq_maybe_wait_for_credit(afl);
+  z_send("FQER", 4, ZMQ_SNDMORE);
+  z_send(req->fname, req->fname_len, 0);
+#ifdef CREDIT_DEBUG
+  SAYF("add queue exchange response %d\n", afl->zmq_credit);
+#endif
+  zmq_dec_credit(afl);
+}
+
+static int __zmq_add_queue_exchange_request(afl_state_t * afl) {
+
+  struct queue_exchange_req * req = calloc(1, sizeof(*req));
+
+  Z_READ(&req->ann_id, sizeof(req->ann_id));
+
+  Z_READ(&req->fname_len, sizeof(req->fname_len));
+
+  u8 * fn = ck_alloc(req->fname_len+1);
+  Z_READ(fn, req->fname_len);
+  req->fname = fn;
+
+  Z_READ(&req->len, sizeof(req->len));
+
+  list_append(&afl->queue_exchange_requests, req);
+
 }
 
 void remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann) {
@@ -2977,7 +3010,7 @@ void clean_up_annotation_queue_files(afl_state_t * afl) {
   }
 }
 
-static void __zmq_deannotation_req(afl_state_t * afl) {
+static int __zmq_deannotation_req(afl_state_t * afl) {
   int id;
   Z_READ(&id, sizeof(id))
   if (get_head(&afl->active_annotations)->next) {
@@ -3009,6 +3042,7 @@ static void __zmq_deannotation_req(afl_state_t * afl) {
   SAYF("ann disable ann %d\n", afl->zmq_credit);
 #endif
   zmq_dec_credit(afl);
+  return 1;
 }
 
 static void check_forkserver_response(afl_state_t * afl) {
@@ -3059,15 +3093,22 @@ void disable_annotation(afl_state_t * afl, annotation_t * ann) {
     check_forkserver_response(afl);
 }
 
-void adjust_active_annotations(afl_state_t * afl, int set_all_active) {
+void adjust_active_annotations(afl_state_t * afl,
+                               int set_all_active,
+                               int set_new_active,
+                               int ann_id) {
   if (get_head(&afl->all_annotations)->next) {
     LIST_FOREACH(&afl->all_annotations, annotation_t, {
 
       if (!el->ignored) {
 
         if (set_all_active ||
+            (set_new_active && !el->initial_sync_done) ||
+            (el->id == ann_id) ||
             (!el->initialized && el->type != ANN_EDGE_COV && el->type != ANN_EDGE_MEM_COV) ||
             queue_entry_belongs_to_ann(el, afl->queue_cur)) {
+
+          el->initial_sync_done = 1;
 
           if (!get_head(&afl->active_annotations)->next ||
               !list_contains(&afl->active_annotations, el)) {
@@ -3113,15 +3154,28 @@ void enable_active_annotations(afl_state_t * afl) {
   }
 }
 
-void exchange_new_queue_files(afl_state_t * afl) {
+static void run_with_testcase(afl_state_t * afl, u8* fname, s32 len) {
+    s32 fd = open(fname, O_RDONLY);
+
+    if (unlikely(fd < 0)) PFATAL("Unable to open '%s'", fname);
+    u8 *buf = mmap(0, len, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+    if (buf == MAP_FAILED) { PFATAL("Unable to mmap '%s' with len %d", fname, len); }
+
+    write_to_testcase(afl, buf, len);
+    u8 fault = fuzz_run_target(afl, &afl->fsrv, afl->fsrv.exec_tmout);
+    save_if_interesting(afl, buf, len, fault);
+
+    munmap(buf, len);
+    close(fd);
+}
+
+static void exchange_for_existing_annotations(afl_state_t * afl) {
   if (afl->queue_top->id <= afl->ann_exchanged_queue_files) {
     return;
   }
   afl->stage_name = "ann exchange";
-  adjust_active_annotations(afl, 1);
+  adjust_active_annotations(afl, 1, 0, -1);
 
-  s32 len, fd;
-  u8 *buf = 0, fault = 0;
   struct queue_entry * q = afl->queue_top, * old_queue_cur = afl->queue_cur;
   afl->syncing_annotation = 1;
   afl->stage_cur = 0;
@@ -3129,19 +3183,8 @@ void exchange_new_queue_files(afl_state_t * afl) {
   while (q) {
     if (q->id <= afl->ann_exchanged_queue_files) break;
     afl->queue_cur = q;
-    fd = open(afl->queue_cur->fname, O_RDONLY);
-    len = afl->queue_cur->len;
 
-    if (unlikely(fd < 0)) PFATAL("Unable to open '%s'", afl->queue_cur->fname);
-    buf = mmap(0, len, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
-    if (buf == MAP_FAILED) { PFATAL("Unable to mmap '%s' with len %d", afl->queue_cur->fname, len); }
-
-    write_to_testcase(afl, buf, len);
-    fault = fuzz_run_target(afl, &afl->fsrv, afl->fsrv.exec_tmout);
-    save_if_interesting(afl, buf, len, fault);
-
-    munmap(buf, len);
-    close(fd);
+    run_with_testcase(afl, afl->queue_cur->fname, afl->queue_cur->len);
 
     if (!(afl->stage_cur++ % afl->stats_update_freq)) { show_stats(afl); }
 
@@ -3152,28 +3195,98 @@ void exchange_new_queue_files(afl_state_t * afl) {
   afl->queue_cur = old_queue_cur;
 }
 
+static void exchange_for_new_annotations(afl_state_t * afl) {
+  afl->stage_name = "ann exchange (new)";
+  adjust_active_annotations(afl, 0, 1, -1);
+
+  struct queue_entry * q = afl->queue_top, * old_queue_cur = afl->queue_cur;
+  afl->syncing_annotation = 1;
+  afl->stage_cur = 0;
+  afl->stage_max = afl->queue_top->id;
+
+  while (q) {
+
+    afl->queue_cur = q;
+
+    run_with_testcase(afl, afl->queue_cur->fname, afl->queue_cur->len);
+
+    if (!(afl->stage_cur++ % afl->stats_update_freq)) { show_stats(afl); }
+
+    q = q->prev;
+  }
+
+  afl->syncing_annotation = 0;
+  afl->queue_cur = old_queue_cur;
+  afl->has_fresh_annotations = 0;
+}
+
+static void exchange_for_requests(afl_state_t * afl) {
+  afl->stage_name = "ann exchange (req)";
+  afl->syncing_annotation = 2;
+  afl->stage_cur = 0;
+  afl->stage_max = 100;
+
+  if (get_head(&afl->queue_exchange_requests)->next) {
+    LIST_FOREACH(&afl->queue_exchange_requests, struct queue_exchange_req, {
+
+      adjust_active_annotations(afl, 0, 0, el->ann_id);
+
+      afl->sync_fname = el->fname;
+
+      run_with_testcase(afl, el->fname, el->len);
+
+      zmq_queue_exchange_response(afl, el);
+
+      LIST_REMOVE_CURRENT_EL_IN_FOREACH();
+
+      afl->sync_fname = NULL;
+      ck_free(el->fname);
+      free(el);
+
+      if (!(afl->stage_cur++ % afl->stats_update_freq)) { show_stats(afl); }
+
+    });
+  }
+
+  afl->syncing_annotation = 0;
+  afl->has_fresh_annotations = 0;
+}
+
+void exchange_new_queue_files(afl_state_t * afl) {
+  exchange_for_existing_annotations(afl);
+  if (afl->has_fresh_annotations) {
+    exchange_for_new_annotations(afl);
+  }
+  exchange_for_requests(afl);
+}
+
 #define MSG_SIZE 4
 
 void zmq_handle_commands(afl_state_t * afl) {
   if (afl->zmq_socket) {
     while (1) {
+      int check_for_response;
       char msg_type [MSG_SIZE] = {0};
       if (zmq_recv(afl->zmq_socket, msg_type, MSG_SIZE, ZMQ_NOBLOCK) == -1) {
         if (errno == EAGAIN) break;
         fprintf(stderr, "ZMQ recv: %s\n", zmq_strerror(errno));
       }
       if (strncmp("BB_R", msg_type, MSG_SIZE) == 0) {
-        __zmq_bb_req(afl);
+        check_for_response = __zmq_bb_req(afl);
       } else if (strncmp("EANR", msg_type, MSG_SIZE) == 0) {
-        __zmq_annotation_req(afl);
+        check_for_response = __zmq_annotation_req(afl);
       } else if (strncmp("DANR", msg_type, MSG_SIZE) == 0) {
-        __zmq_deannotation_req(afl);
+        check_for_response = __zmq_deannotation_req(afl);
       } else if (strncmp("AACT", msg_type, MSG_SIZE) == 0) {
-        __zmq_add_action_req(afl);
+        check_for_response = __zmq_add_action_req(afl);
+      } else if (strncmp("QE_R", msg_type, MSG_SIZE) == 0) {
+        check_for_response = __zmq_add_queue_exchange_request(afl);
       } else {
-        fprintf(stderr, "ZMQ unknown message type: %s\n", msg_type);
+        FATAL("ZMQ unknown message type: %s\n", msg_type);
       }
-      check_forkserver_response(afl);
+      if (check_for_response) {
+        check_forkserver_response(afl);
+      }
     }
   }
 }

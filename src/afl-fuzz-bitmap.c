@@ -429,10 +429,26 @@ u8 *describe_op(afl_state_t *afl, u8 hnb, int64_t hne) {
 
   u8 *ret = afl->describe_op_buf_256;
 
-  if (unlikely(afl->syncing_annotation)) {
+  if (unlikely(afl->syncing_annotation == 1)) {
 
     sprintf(ret, "ann_sync_src:%06u,time:%llu",
             afl->queue_cur->id, get_cur_time() - afl->start_time);
+
+  } else if (unlikely(afl->syncing_annotation == 2)) {
+
+    u8 id[64] = {0};
+    u8 *start = strstr(afl->sync_fname, "id:") + 3;
+    u8 *end = strchr(afl->sync_fname, ',');
+    int len = end-start;
+
+    if (len >= 64) {
+      len = 63;
+    }
+
+    snprintf(id, len, "%s", start);
+
+    sprintf(ret, "exchange_src:%s,time:%llu",
+            id, get_cur_time() - afl->start_time);
 
   } else if (unlikely(afl->syncing_party)) {
 
@@ -885,6 +901,10 @@ u8 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
           }
         }
       });
+    }
+
+    if (afl->syncing_annotation == 2) {
+      return 0;
     }
 
     /* Keep if there are new bits in the map is improved,

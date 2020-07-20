@@ -157,7 +157,7 @@ struct queue_entry * add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passe
       });
     }
     list_append(&ann->corresponding_queue_files, q);
-    ann->new_ann_queue_files = 1;
+    ann->new_ann_queue_files += 1;
     q->ann_pos = ++ann->num_corresponding_queue_files;
     ann->newest_qe = q;
     q->ann_candidate = ann_candidate;

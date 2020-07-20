@@ -180,6 +180,7 @@ typedef struct annotation {
   list_t corresponding_queue_files;
   int num_corresponding_queue_files;
   int new_ann_queue_files;
+  int initial_sync_done;
   int ignored;
   struct queue_entry * newest_qe;
   list_t meta_node_hashes;
@@ -223,6 +224,13 @@ struct queue_entry {
   u32 ann_pos;                          /* Is at that position for queue files belonging to this ann */
   u8 ann_best_for_pos[ANNOTATION_RESULT_SIZE]; /* if best for relevant position */
 
+};
+
+struct queue_exchange_req {
+  int ann_id;
+  int fname_len;
+  u8 *fname;
+  u32 len;
 };
 
 struct extra_data {
@@ -533,6 +541,7 @@ typedef struct afl_state {
   u32 queued_paths,                     /* Current number of queued testcases */
       total_queued_paths,               /* Total number of queued testcases */
       ann_exchanged_queue_files,        /* Up to this value queue files were exchanged */
+      has_fresh_annotations,            /* New annotations, time to show them all queue files */
       queued_variable,                  /* Testcases with variable behavior */
       queued_at_start,                  /* Total number of initial inputs   */
       queued_discovered,                /* Items discovered during this run */
@@ -574,6 +583,7 @@ typedef struct afl_state {
 
   u8 *stage_name,                       /* Name of the current fuzz stage   */
       *stage_short,                     /* Short stage name                 */
+      *sync_fname,                      /* Filename for exchange            */
       *syncing_party;                   /* Currently syncing with...        */
 
   u8 stage_name_buf[STAGE_BUF_SIZE];    /* reused stagename buf with len 64 */
@@ -655,6 +665,7 @@ typedef struct afl_state {
 
   list_t all_annotations;
   list_t active_annotations;
+  list_t queue_exchange_requests;
 
 #ifdef _AFL_DOCUMENT_MUTATIONS
   u8  do_document;
@@ -1031,7 +1042,7 @@ void   remove_qe_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe);
 fuzz_bucket_t calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe);
 int    skip_queue_file(afl_state_t * afl, struct queue_entry * qe);
 void   disable_annotation(afl_state_t * afl, annotation_t * ann);
-void   adjust_active_annotations(afl_state_t * afl, int);
+void   adjust_active_annotations(afl_state_t * afl, int, int, int);
 void   disable_active_annotations(afl_state_t * afl);
 void   enable_active_annotations(afl_state_t * afl);
 void   exchange_new_queue_files(afl_state_t * afl);
