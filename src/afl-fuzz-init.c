@@ -2738,6 +2738,19 @@ static void zmq_queue_exchange_response(afl_state_t * afl, struct queue_exchange
   zmq_dec_credit(afl);
 }
 
+void zmq_cycle_done(afl_state_t * afl) {
+  zmq_maybe_wait_for_credit(afl);
+  z_send("F_CD", 4, ZMQ_SNDMORE);
+  z_send(&afl->quick_cycle, sizeof(afl->quick_cycle), 0);
+
+  afl->quick_cycle = 0;
+
+#ifdef CREDIT_DEBUG
+  SAYF("cycle done response %d\n", afl->zmq_credit);
+#endif
+  zmq_dec_credit(afl);
+}
+
 static int __zmq_add_queue_exchange_request(afl_state_t * afl) {
 
   struct queue_exchange_req * req = calloc(1, sizeof(*req));
@@ -2916,23 +2929,23 @@ fuzz_bucket_t calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) 
     case ANN_MAX_SINGLE:
 
       if (qe->ann_candidate && qe->fuzz_level == 0) {
-        return update_totals(afl, qe, FB_ANCILLARY_CANDIDATE);
+        return update_totals(afl, qe, FB_CANDIDATE);
 
       } else if (qe->ann_candidate && qe->fuzz_level > CANDIDATE_GRACE_PERIOD) {
-        return update_totals(afl, qe, FB_ANCILLARY_ONE_IN_TWENTY);
+        return update_totals(afl, qe, FB_BASE);
 
       } else {
-        return update_totals(afl, qe, FB_ANCILLARY);
+        return update_totals(afl, qe, FB_BASE);
       }
 
 
     case ANN_SET:
 
       if (qe->fuzz_level == 0) {
-        return update_totals(afl, qe, FB_ANCILLARY_ONE_IN_FIVE);
+        return update_totals(afl, qe, FB_CANDIDATE);
 
       } else {
-        return update_totals(afl, qe, FB_ANCILLARY_ONE_OF_ALL);
+        return update_totals(afl, qe, FB_ONE_OF_ALL);
       }
 
 
@@ -2959,6 +2972,7 @@ int skip_queue_file(afl_state_t * afl, struct queue_entry * qe) {
   for (fuzz_bucket_t i = PRIORITY_FB_START; i <= PRIORITY_FB_END; i++) {
     if (afl->totals_fuzz_level[i] > 0) {
       if (fb > i) {
+        afl->quick_cycle = 1;
         return 1;
       } else {
         return 0;

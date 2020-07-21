@@ -411,6 +411,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
          !afl->queue_cur->favored) &&
         rand_below(afl, 100) < SKIP_TO_NEW_PROB) {
 
+      afl->quick_cycle = 1;
       return 1;
 
     }

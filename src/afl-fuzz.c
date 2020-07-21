@@ -1250,6 +1250,7 @@ int main(int argc, char **argv_orig, char **envp) {
 
     if (!afl->queue_cur) {
 
+      zmq_cycle_done(afl);
       ++afl->queue_cycle;
       afl->current_entry = 0;
       afl->cur_skipped_paths = 0;

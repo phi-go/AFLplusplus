@@ -133,8 +133,8 @@ typedef enum {ANN_MIN_SINGLE, ANN_SET, ANN_MAX_SINGLE, ANN_MIN_ITER, ANN_MAX_ITE
               ANN_MIN_ADDRESS, ANN_MAX_ADDRESS, ANN_OVERFLOW,
               ANN_NUMBER_OF_TYPES} annotation_type_t;
 
-#define CANDIDATE_GRACE_PERIOD 1
-#define USEFUL_GRACE_PERIOD 16
+#define CANDIDATE_GRACE_PERIOD 8
+#define USEFUL_GRACE_PERIOD 32
 #define ANCILLARY_FACTOR 2
 #define CANDIDATE_FB_FACTOR 10
 
@@ -531,7 +531,8 @@ typedef struct afl_state {
       fixed_seed,                       /* do not reseed                    */
       fast_cal,                         /* Try to calibrate faster?         */
       disable_trim,                     /* Never trim in fuzz_one           */
-      syncing_annotation;               /* Currently syncing annotations queue files */
+      syncing_annotation,               /* Currently syncing annotations queue files */
+      quick_cycle;                      /* During the current cycle normal queue entries where skipped */
 
   u8 *virgin_bits,                      /* Regions yet untouched by fuzzing */
       *virgin_tmout,                    /* Bits we haven't seen in tmouts   */
@@ -1040,6 +1041,7 @@ void   zmq_send_queue_entry_removal(afl_state_t * afl, struct queue_entry * qe);
 void   zmq_send_exec_update(afl_state_t *, struct queue_entry *, u64);
 void   zmq_send_annotation_update(afl_state_t *, int ann_id, u64 pos, u64 new_best);
 void   zmq_handle_commands(afl_state_t *);
+void   zmq_cycle_done(afl_state_t * afl);
 void   remove_annotation_queue_files(afl_state_t * afl, annotation_t * ann);
 void   clean_up_annotation_queue_files(afl_state_t * afl);
 void   init_qe_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe);
