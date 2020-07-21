@@ -2915,7 +2915,7 @@ fuzz_bucket_t calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) 
 
     case ANN_META_NODE:
 
-      if (qe->fuzz_level == 0) {
+      if (qe->fuzz_level <= CANDIDATE_GRACE_PERIOD) {
         return update_totals(afl, qe, FB_CANDIDATE);
 
       } else {
