@@ -2025,6 +2025,13 @@ static void __afl_start_forkserver(void) {
         annotation_t * ann, * tmp_ann;
         HASH_ITER(hh_active, active_annotations_map, ann, tmp_ann) {
           ann->shm_addr->num_writes_during_run = 0;
+          
+          // this is actually only needed for persistent mode
+          action_t * act = NULL;
+          LL_FOREACH2(ann->actions, act, annotation_next) {
+              set_breakpoint(act, /*quiet*/ 1);
+              act->active = 1;
+          }
         }
       }
 
@@ -2070,14 +2077,6 @@ static void __afl_start_forkserver(void) {
 
     if (WIFSIGNALED(status)) {
       FPRINTF_TO_ERR_FILE("PUT signaled: %d, core: %d\n", WTERMSIG(status), WCOREDUMP(status));
-    }
-
-    if (WIFSTOPPED(status)) {
-      FPRINTF_TO_ERR_FILE("PUT stopped: %d\n", WSTOPSIG(status));
-    }
-
-    if (WIFCONTINUED(status)) {
-      FPRINTF_TO_ERR_FILE("PUT continued\n");
     }
 
     /* Relay wait status to pipe, then loop back. */
