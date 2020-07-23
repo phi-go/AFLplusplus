@@ -2854,7 +2854,7 @@ fuzz_bucket_t calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) 
   if (qe->favored) {
     if (qe->was_fuzzed == 0 && qe->fuzz_level == 0) {
       return update_totals(afl, qe, FB_FAVORED);
-    } else if (qe->fuzz_level <= USEFUL_GRACE_PERIOD) {
+    } else if (qe->fuzz_level < USEFUL_GRACE_PERIOD) {
       return update_totals(afl, qe, FB_CANDIDATE);
     } else {
       return update_totals(afl, qe, FB_BASE);
@@ -2864,7 +2864,7 @@ fuzz_bucket_t calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) 
 
   if (qe->ann == NULL) {
 
-    if (qe->fuzz_level <= CANDIDATE_GRACE_PERIOD) {
+    if (qe->fuzz_level < CANDIDATE_GRACE_PERIOD) {
       return update_totals(afl, qe, FB_CANDIDATE);
 
     } else {
@@ -2879,7 +2879,7 @@ fuzz_bucket_t calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) 
 
       if (qe->ann_candidate) {
 
-        if (qe->fuzz_level <= USEFUL_GRACE_PERIOD) {
+        if (qe->fuzz_level < USEFUL_GRACE_PERIOD) {
           return update_totals(afl, qe, FB_CANDIDATE);
 
         } else {
@@ -2889,7 +2889,7 @@ fuzz_bucket_t calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) 
 
       } else {
 
-        if (qe->fuzz_level <= USEFUL_GRACE_PERIOD) {
+        if (qe->fuzz_level < USEFUL_GRACE_PERIOD) {
           return update_totals(afl, qe, FB_MIN_SINGLE);
 
         } else {
@@ -2902,7 +2902,7 @@ fuzz_bucket_t calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) 
     case ANN_MAX_ITER:
     case ANN_MIN_CONTEXT:
 
-      if (qe->fuzz_level <= USEFUL_GRACE_PERIOD) {
+      if (qe->fuzz_level < USEFUL_GRACE_PERIOD) {
         return update_totals(afl, qe, FB_MIN_SINGLE);
 
       } else if (qe->ann_candidate) {
@@ -2915,7 +2915,7 @@ fuzz_bucket_t calculate_fuzz_bucket(afl_state_t * afl, struct queue_entry * qe) 
 
     case ANN_META_NODE:
 
-      if (qe->fuzz_level <= CANDIDATE_GRACE_PERIOD) {
+      if (qe->fuzz_level < CANDIDATE_GRACE_PERIOD) {
         return update_totals(afl, qe, FB_CANDIDATE);
 
       } else {
@@ -3101,7 +3101,8 @@ static int __zmq_deannotation_req(afl_state_t * afl) {
   write_to_command_pipe(&id, sizeof(id));
 
   zmq_maybe_wait_for_credit(afl);
-  z_send("FDAR", 4, 0);
+  z_send("FDAR", 4, ZMQ_SNDMORE);
+  z_send(&id, sizeof(id), 0);
 #ifdef CREDIT_DEBUG
   SAYF("ann disable ann %d\n", afl->zmq_credit);
 #endif
